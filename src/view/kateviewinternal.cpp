@@ -1758,9 +1758,10 @@ KTextEditor::Cursor KateViewInternal::pointToCursor(const QPoint& p) const
 }
 
 // Point in content coordinates
-void KateViewInternal::placeCursor(const QPoint &p, bool keepSelection, bool updateSelection)
+void KateViewInternal::placeCursor(const QPoint &p, bool keepSelection, bool updateSelection, bool doSubstract)
 {
     auto c = pointToCursor(p);
+    m_cursorToSubstract = c;
     if ( ! c.isValid() ) {
         return;
     }
@@ -1771,7 +1772,7 @@ void KateViewInternal::placeCursor(const QPoint &p, bool keepSelection, bool upd
         cursors()->setPrimaryCursorWithoutSelection(c);
     }
     else {
-        cursors()->setPrimaryCursor(c);
+        cursors()->setPrimaryCursor(c, true, false, doSubstract);
     }
     m_minLinesVisible = tmp;
 
@@ -2108,7 +2109,7 @@ void KateViewInternal::mousePressEvent(QMouseEvent *e)
                 m_dragInfo.start = e->pos();
             }
             else {
-                if ( e->modifiers() == (Qt::ControlModifier | Qt::MetaModifier) ) {
+                if ( e->modifiers() == Qt::MetaModifier ) {
                     flags = KateMultiSelection::AddNewCursor;
                 }
                 else {
@@ -2127,9 +2128,16 @@ void KateViewInternal::mousePressEvent(QMouseEvent *e)
     }
 }
 
+void KateViewInternal::removeLastSelection()
+{
+    KateMultiCursor::CursorRepainter rep(cursors());
+    selections()->removeLastSelection();
+    Q_EMIT m_view->selectionChanged(m_view);
+}
+
 void KateViewInternal::mouseDoubleClickEvent(QMouseEvent *e)
 {
-    auto secondary = (e->modifiers() == (Qt::MetaModifier | Qt::ControlModifier));
+    auto secondary = (e->modifiers() == Qt::MetaModifier);
     auto newCursor = pointToCursor(e->pos());
 
     switch (e->button()) {
@@ -2246,7 +2254,10 @@ void KateViewInternal::mouseReleaseEvent(QMouseEvent *e)
         }
 
         if (m_dragInfo.state == diPending) {
-            placeCursor(e->pos(), e->modifiers() & Qt::ShiftModifier);
+            // I don't know what is the best method to transmit the doSubstract value
+            // Maybe I should do like m_cursorToSubstract
+            bool doSubstract = (bool)(e->modifiers() & Qt::MetaModifier);
+            placeCursor(e->pos(), e->modifiers() & Qt::ShiftModifier, false, doSubstract);
             Q_EMIT m_view->selectionChanged(m_view);
         } else if (m_dragInfo.state == diNone) {
             m_scrollTimer.stop();

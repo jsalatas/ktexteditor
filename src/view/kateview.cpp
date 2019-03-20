@@ -25,6 +25,8 @@
 //BEGIN includes
 #include "kateview.h"
 
+// Maybe I should not include katesearchbar here ...
+#include "katesearchbar.h"
 #include "kateviewinternal.h"
 #include "kateviewhelpers.h"
 #include "katerenderer.h"
@@ -668,6 +670,8 @@ void KTextEditor::ViewPrivate::setupActions()
     a = m_toggleBlockSelection = new KToggleAction(i18n("Toggle Bl&ock Selection"), this);
     ac->addAction(QStringLiteral("set_verticalSelect"), a);
     a->setWhatsThis(i18n("This command allows switching an existing selection between a block of text and a continuous (line-based) selection."));
+    // Maybe we should make an exclusion : toggle between multiple-selection and block selection
+    // a->setDisabled(true);
     connect(a, SIGNAL(triggered(bool)), SLOT(toggleBlockSelection()));
 
     a = ac->addAction(QStringLiteral("selection_to_block"), this);
@@ -975,13 +979,28 @@ void KTextEditor::ViewPrivate::setupEditActions()
     connect(a, SIGNAL(triggered(bool)), SLOT(shiftUp()));
     m_editActions << a;
 
-    a = ac->addAction(QStringLiteral("freeze_secondary_cursors"));
-    a->setText(i18n("Freeze secondary cursor positions"));
-    a->setCheckable(true);
-    a->setChecked(false);
-    ac->setDefaultShortcut(a, QKeySequence(Qt::CTRL + Qt::META + Qt::Key_F));
-    connect(a, SIGNAL(triggered(bool)), SLOT(setSecondaryCursorsFrozen(bool)));
-    m_editActions << a;
+    // a = ac->addAction(QStringLiteral("freeze_secondary_cursors"));
+    // a->setText(i18n("Freeze secondary cursor positions"));
+    // a->setCheckable(true);
+    // a->setChecked(false);
+    // ac->setDefaultShortcut(a, QKeySequence(Qt::CTRL + Qt::META + Qt::Key_F));
+    // connect(a, SIGNAL(triggered(bool)), SLOT(setSecondaryCursorsFrozen(bool)));
+    // m_editActions << a;
+
+    a = ac->addAction(QStringLiteral("add_find_next"));
+    a->setText(i18n("Find next occurence and add it to selection"));
+    ac->setDefaultShortcut(a, QKeySequence(Qt::META + Qt::Key_F));
+    connect(a, SIGNAL(triggered(bool)), SLOT(addFindNext()));
+
+    a = ac->addAction(QStringLiteral("forget_find_next"));
+    a->setText(i18n("Forget current occurence, find next and add it to selection"));
+    ac->setDefaultShortcut(a, QKeySequence(Qt::SHIFT + Qt::META + Qt::Key_F));
+    connect(a, SIGNAL(triggered(bool)), SLOT(forgetAndAddFindNext()));
+
+    a = ac->addAction(QStringLiteral("forget_last_find"));
+    a->setText(i18n("Forget last occurence, remove it from selection"));
+    ac->setDefaultShortcut(a, QKeySequence(Qt::META + Qt::Key_Escape));
+    connect(a, SIGNAL(triggered(bool)), SLOT(forgetLastFind()));
 
     a = ac->addAction(QStringLiteral("add_virtual_cursor"));
     a->setText(i18n("Add secondary cursor at cursor position"));
@@ -1782,6 +1801,34 @@ void KTextEditor::ViewPrivate::findNext()
 void KTextEditor::ViewPrivate::findPrevious()
 {
     currentInputMode()->findPrevious();
+}
+
+void KTextEditor::ViewPrivate::addFindNext()
+{
+    const bool selected = this->selection();
+    if (selected) {
+        const QString pattern = this->selectionText();
+        KateSearchBar::nextMatchForSelection(this, KateSearchBar::SearchForward, true);
+    }
+}
+
+void KTextEditor::ViewPrivate::forgetAndAddFindNext()
+{
+    const bool selected = this->selection();
+    if (selected) {
+        const QString pattern = this->selectionText();
+        m_viewInternal->removeLastSelection();
+        KateSearchBar::nextMatchForSelection(this, KateSearchBar::SearchForward, true, true);
+    }
+}
+
+void KTextEditor::ViewPrivate::forgetLastFind()
+{
+    const bool selected = this->selection();
+    if (selected) {
+        const QString pattern = this->selectionText();
+        m_viewInternal->removeLastSelection();
+    }
 }
 
 void KTextEditor::ViewPrivate::slotSelectionChanged()
@@ -2987,6 +3034,21 @@ void KTextEditor::ViewPrivate::toNextModifiedLine()
 KTextEditor::Range KTextEditor::ViewPrivate::selectionRange() const
 {
     return primarySelection();
+}
+
+KTextEditor::Range KTextEditor::ViewPrivate::selectionLastRange() const
+{
+    return finalSelection();
+}
+
+KTextEditor::Range KTextEditor::ViewPrivate::fromNewRangeKateView() const
+{
+    return m_fromNewRange;
+}
+
+void KTextEditor::ViewPrivate::setNewRangeKateView(KTextEditor::Range range)
+{
+    m_fromNewRange = range;
 }
 
 QVector<KTextEditor::Range> KTextEditor::ViewPrivate::selectionRanges() const

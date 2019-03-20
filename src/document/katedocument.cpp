@@ -4707,6 +4707,8 @@ void KTextEditor::DocumentPrivate::setViewVariable(QString var, QString val)
             v->config()->setDynWordWrap(state);
         } else if (var == QLatin1String("persistent-selection") && checkBoolValue(val, &state)) {
             v->config()->setPersistentSelection(state);
+        } else if (var == QLatin1String("multiple-selection") && checkBoolValue(val, &state)) {
+            v->config()->setMultipleSelection(state);
         } else if (var == QLatin1String("block-selection")  && checkBoolValue(val, &state)) {
             v->setBlockSelection(state);
         }

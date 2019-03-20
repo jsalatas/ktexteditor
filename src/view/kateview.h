@@ -281,6 +281,9 @@ public Q_SLOTS:
     KTextEditor::Range primarySelection() const {
         return selections()->primarySelection();
     };
+    KTextEditor::Range finalSelection() const {
+        return selections()->finalSelection();
+    };
     /**
      * @brief Set the primary selection.
      */
@@ -317,6 +320,10 @@ public:
     QString selectionText() const override;
     bool blockSelection() const override;
     KTextEditor::Range selectionRange() const override;
+    KTextEditor::Range selectionLastRange() const;
+    KTextEditor::Range fromNewRangeKateView() const;
+    void setNewRangeKateView(KTextEditor::Range range);
+    KTextEditor::Range m_fromNewRange;
     QVector<KTextEditor::Range> selectionRanges() const override;
 
     static void blockFix(KTextEditor::Range &range);
@@ -557,6 +564,9 @@ public Q_SLOTS:
     void replace();
     void findNext();
     void findPrevious();
+    void addFindNext();
+    void forgetAndAddFindNext();
+    void forgetLastFind();
 
     void setFoldingMarkersOn(bool enable);   // Not in KTextEditor::View, but should be
     void setIconBorder(bool enable);

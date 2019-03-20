@@ -526,6 +526,9 @@ public:
     bool persistentSelection() const;
     void setPersistentSelection(bool on);
 
+    bool multipleSelection() const;
+    void setMultipleSelection(bool on);
+
     KTextEditor::View::InputMode inputMode() const;
     void setInputMode(KTextEditor::View::InputMode mode);
     void setInputModeRaw(int rawmode);
@@ -602,6 +605,7 @@ private:
     int m_maxHistorySize;
     uint m_defaultMarkType;
     bool m_persistentSelection;
+    bool m_multipleSelection;
     KTextEditor::View::InputMode m_inputMode;
     bool m_viInputModeStealKeys;
     bool m_viRelativeLineNumbers;
@@ -637,6 +641,7 @@ private:
     bool m_searchFlagsSet : 1;
     bool m_defaultMarkTypeSet : 1;
     bool m_persistentSelectionSet : 1;
+    bool m_multipleSelectionSet : 1;
     bool m_inputModeSet : 1;
     bool m_viInputModeStealKeysSet : 1;
     bool m_viRelativeLineNumbersSet : 1;

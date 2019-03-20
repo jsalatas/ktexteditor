@@ -1341,6 +1341,7 @@ const char KEY_MAX_HISTORY_SIZE[] = "Maximum Search History Size";
 const char KEY_DEFAULT_MARK_TYPE[] = "Default Mark Type";
 const char KEY_ALLOW_MARK_MENU[] = "Allow Mark Menu";
 const char KEY_PERSISTENT_SELECTION[] = "Persistent Selection";
+const char KEY_MULTIPLE_SELECTION[] = "Multiple Selection";
 const char KEY_INPUT_MODE[] = "Input Mode";
 const char KEY_VI_INPUT_MODE_STEAL_KEYS[] = "Vi Input Mode Steal Keys";
 const char KEY_VI_RELATIVE_LINE_NUMBERS[] = "Vi Relative Line Numbers";
@@ -1402,6 +1403,7 @@ void KateViewConfig::readConfig(const KConfigGroup &config)
     setAllowMarkMenu(config.readEntry(KEY_ALLOW_MARK_MENU, true));
 
     setPersistentSelection(config.readEntry(KEY_PERSISTENT_SELECTION, false));
+    setMultipleSelection(config.readEntry(KEY_MULTIPLE_SELECTION, false));
 
     setInputModeRaw(config.readEntry(KEY_INPUT_MODE, 0));
     setViInputModeStealKeys(config.readEntry(KEY_VI_INPUT_MODE_STEAL_KEYS, false));
@@ -1465,6 +1467,7 @@ void KateViewConfig::writeConfig(KConfigGroup &config)
     config.writeEntry(KEY_ALLOW_MARK_MENU, allowMarkMenu());
 
     config.writeEntry(KEY_PERSISTENT_SELECTION, persistentSelection());
+    config.writeEntry(KEY_MULTIPLE_SELECTION, multipleSelection());
 
     config.writeEntry(KEY_AUTOMATIC_COMPLETION_INVOCATION, automaticCompletionInvocation());
     config.writeEntry(KEY_WORD_COMPLETION, wordCompletion());
@@ -1981,6 +1984,29 @@ void KateViewConfig::setPersistentSelection(bool on)
 
     m_persistentSelectionSet = true;
     m_persistentSelection = on;
+
+    configEnd();
+}
+
+bool KateViewConfig::multipleSelection() const
+{
+    if (m_multipleSelectionSet || isGlobal()) {
+        return m_multipleSelection;
+    }
+
+    return s_global->multipleSelection();
+}
+
+void KateViewConfig::setMultipleSelection(bool on)
+{
+    if (m_multipleSelectionSet && m_multipleSelection == on) {
+        return;
+    }
+
+    configStart();
+
+    m_multipleSelectionSet = true;
+    m_multipleSelection = on;
 
     configEnd();
 }

@@ -418,7 +418,14 @@ void KateNavigationConfigTab::apply()
     KateViewConfig::global()->setAutoCenterLines(qMax(0, ui->sbAutoCenterCursor->value()));
     KateDocumentConfig::global()->setPageUpDownMovesCursor(ui->chkPagingMovesCursor->isChecked());
 
-    KateViewConfig::global()->setPersistentSelection(ui->cbTextSelectionMode->currentIndex() == 1);
+    const int selectionModeIndex = ui->cbTextSelectionMode->currentIndex();
+    KateViewConfig::global()->setPersistentSelection(selectionModeIndex == 1);
+    KateViewConfig::global()->setMultipleSelection(selectionModeIndex == 2);
+    // TODO Should:
+    // - trigger setBlockSelection(false)
+    // - disable toggleBlocSelection() (menu entry and shortcut)
+    // - disable shift + double clic
+    // But how to do that from here ?
 
     KateViewConfig::global()->setScrollPastEnd(ui->chkScrollPastEnd->isChecked());
 
@@ -430,7 +437,14 @@ void KateNavigationConfigTab::apply()
 
 void KateNavigationConfigTab::reload()
 {
-    ui->cbTextSelectionMode->setCurrentIndex(KateViewConfig::global()->persistentSelection() ? 1 : 0);
+    int selectionModeIndex = 0;
+    if (KateViewConfig::global()->persistentSelection()) {
+        selectionModeIndex = 1;
+    }
+    if (KateViewConfig::global()->multipleSelection()) {
+        selectionModeIndex = 2;
+    }
+    ui->cbTextSelectionMode->setCurrentIndex(selectionModeIndex);
 
     ui->chkSmartHome->setChecked(KateDocumentConfig::global()->smartHome());
     ui->chkPagingMovesCursor->setChecked(KateDocumentConfig::global()->pageUpDownMovesCursor());

@@ -108,6 +108,11 @@
             <string>Persistent</string>
            </property>
           </item>
+          <item>
+           <property name="text">
+            <string>Multiple</string>
+           </property>
+          </item>
          </widget>
         </item>
         <item>

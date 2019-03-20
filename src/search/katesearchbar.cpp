@@ -1209,7 +1209,7 @@ void KateSearchBar::onPowerModeChanged(int /*index*/)
     givePatternFeedback();
 }
 
-/*static*/ void KateSearchBar::nextMatchForSelection(KTextEditor::ViewPrivate *view, SearchDirection searchDirection)
+/*static*/ void KateSearchBar::nextMatchForSelection(KTextEditor::ViewPrivate *view, SearchDirection searchDirection, bool hasMeta, bool fromNewRange)
 {
     const bool selected = view->selection();
     if (selected) {
@@ -1222,7 +1222,7 @@ void KateSearchBar::onPowerModeChanged(int /*index*/)
         }
 
         // Where to find?
-        const Range selRange = view->selectionRange();
+        const Range selRange = hasMeta ? (fromNewRange ? view->fromNewRangeKateView() : view->selectionLastRange()) : view->selectionRange();
         Range inputRange;
         if (searchDirection == SearchForward) {
             inputRange.setRange(selRange.end(), view->doc()->documentEnd());
@@ -1235,7 +1235,16 @@ void KateSearchBar::onPowerModeChanged(int /*index*/)
         match.searchText(inputRange, pattern);
 
         if (match.isValid()) {
-            selectRange(view, match.range());
+            if (hasMeta) {
+                view->selections()->beginNewSelection(
+                    match.range().end(),
+                    match.range(),
+                    KateMultiSelection::AddNewCursor
+                );
+                view->setNewRangeKateView(match.range());
+            } else {
+                selectRange(view, match.range());
+            }
         } else {
             // Find, second try
             if (searchDirection == SearchForward) {
@@ -1246,7 +1255,17 @@ void KateSearchBar::onPowerModeChanged(int /*index*/)
             KateMatch match2(view->doc(), enabledOptions);
             match2.searchText(inputRange, pattern);
             if (match2.isValid()) {
-                selectRange(view, match2.range());
+                if (hasMeta) {
+                    qDebug() << "-- hasMeta with range : " << match2.range();
+                    view->selections()->beginNewSelection(
+                        match2.range().end(),
+                        match2.range(),
+                        KateMultiSelection::AddNewCursor
+                    );
+                    view->setNewRangeKateView(match2.range());
+                } else {
+                    selectRange(view, match2.range());
+                }
             }
         }
     } else {

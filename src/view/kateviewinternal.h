@@ -228,6 +228,7 @@ protected:
     void keyPressEvent(QKeyEvent *) override;
     void keyReleaseEvent(QKeyEvent *) override;
     void resizeEvent(QResizeEvent *) override;
+    void removeLastSelection();
     void mousePressEvent(QMouseEvent *) override;
     void mouseDoubleClickEvent(QMouseEvent *) override;
     void mouseReleaseEvent(QMouseEvent *) override;
@@ -275,7 +276,7 @@ private:
     void beginSelectLine(const QPoint &pos);
 
     KTextEditor::Cursor pointToCursor(const QPoint& p) const;
-    void placeCursor(const QPoint &p, bool keepSelection = false, bool updateSelection = true);
+    void placeCursor(const QPoint &p, bool keepSelection = false, bool updateSelection = true, bool doSubtract = false);
     bool isTargetSelected(const QPoint &p);
     //Returns whether the given range affects the area currently visible in the view
     bool rangeAffectsView(const KTextEditor::Range &range, bool realCursors) const;
@@ -301,6 +302,8 @@ private:
     KTextEditor::Cursor m_lastUpdatedPrimary;
 
 public:
+    KTextEditor::Cursor m_cursorToSubstract;
+
     const KateMultiCursor* cursors() const {
         return &m_cursors;
     }

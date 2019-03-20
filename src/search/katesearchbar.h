@@ -90,7 +90,7 @@ public:
     bool matchCase() const;
 
     // Only used by KTextEditor::ViewPrivate
-    static void nextMatchForSelection(KTextEditor::ViewPrivate *view, SearchDirection searchDirection);
+    static void nextMatchForSelection(KTextEditor::ViewPrivate *view, SearchDirection searchDirection, bool hasMeta = false, bool fromNewRange = false);
 
 public Q_SLOTS:
     /**

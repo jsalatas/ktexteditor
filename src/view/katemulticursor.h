@@ -59,7 +59,7 @@ public:
     bool hasSecondaryCursors() const;
     int cursorsCount() const;
 
-    void setPrimaryCursor(const Cursor& cursor, bool repaint = true, bool select = false);
+    void setPrimaryCursor(const Cursor& cursor, bool repaint = true, bool select = false, bool doSubstract = false);
     /// do not touch selection
     void setPrimaryCursorWithoutSelection(const Cursor& cursor, bool repaint = true);
 
@@ -134,10 +134,14 @@ private:
 
     bool m_secondaryFrozen = false;
 
+public:
+    void removeLastCursorInternal();
+
 private:
     QVector<MovingCursor::Ptr> allCursors() const;
     void appendCursorInternal(const Cursor& cursor);
     void removeCursorInternal(const MovingCursor::Ptr& cursor);
+    void removeCursorInternal(int index);
     enum CursorSelectionFlags {
         NoFlags = 0x0,
         UseMostRecentCursor = 0x1
@@ -169,6 +173,7 @@ public:
     KateMultiSelection(KateViewInternal* view);
 
     KTextEditor::Range primarySelection() const;
+    KTextEditor::Range finalSelection() const;
     bool hasMultipleSelections() const;
     bool hasSelections() const;
     Selections selections() const;
@@ -178,8 +183,9 @@ public:
     void setSelection(const KTextEditor::Range& selection, const Cursor& cursor = Cursor::invalid());
     void setSelection(const QVector<KTextEditor::Range>& selection, const QVector<Cursor>& cursors);
     void setSelectionBlock(const KTextEditor::Range& encompassedBlock, const KateMultiCursor::Direction cursorEdge);
-    void clearSelection();
-    void clearSelectionIfNotPersistent();
+    void clearSelection(bool doSubstract = false);
+    void clearSelectionIfNotPersistent(bool doSubstract = false);
+    void removeLastSelection();
 
     // Mouse selection
     enum SelectionMode {
@@ -195,6 +201,7 @@ public:
     };
     Q_DECLARE_FLAGS(SelectionFlags, SelectionFlag)
     void beginNewSelection(const Cursor& fromCursor, SelectionMode mode = Character, SelectionFlags flags = UsePrimaryCursor);
+    void beginNewSelection(const Cursor& fromCursor, const KTextEditor::Range& range, SelectionFlags flags = UsePrimaryCursor);
     void updateNewSelection(const Cursor& cursor);
     void finishNewSelection();
     bool currentlySelecting() const;
@@ -222,7 +229,7 @@ private:
     /**
      * @brief Clear the selection, i.e. set all selection ranges to empty.
      */
-    void clearSelectionInternal();
+    void clearSelectionInternal(bool doSubstract = false);
 
     /**
      * @brief Removes *all* cursors and selections, including the primary cursor.
@@ -242,7 +249,7 @@ public:
     class SelectingCursorMovement
     {
     public:
-        SelectingCursorMovement(KateMultiSelection* selections, bool isSelecting = true, bool allowDuplicates = false);
+        SelectingCursorMovement(KateMultiSelection* selections, bool isSelecting = true, bool allowDuplicates = false, bool doSubtract = false);
         ~SelectingCursorMovement();
 
     private:
@@ -252,6 +259,7 @@ public:
         PositionMap m_oldPositions;
         PositionMap currentPositions() const;
         bool m_allowDuplicates;
+        bool m_doSubstract;
     };
     friend class SelectingCursorMovement;
     friend class CursorRepainter;

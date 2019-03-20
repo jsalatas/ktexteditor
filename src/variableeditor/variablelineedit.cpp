@@ -277,6 +277,11 @@ void VariableLineEdit::addKateItems(VariableListView *listview)
     item->setHelpText(i18nc("short translation please", "Enable persistent text selection."));
     listview->addItem(item);
 
+    // Add 'multiple-selection' to list
+    item = new VariableBoolItem(QStringLiteral("multiple-selection"), viewConfig->multipleSelection());
+    item->setHelpText(i18nc("short translation please", "Enable multiple text selection."));
+    listview->addItem(item);
+
     // Add 'replace-tabs-save' to list
     item = new VariableBoolItem(QStringLiteral("replace-tabs-save"), false);
     item->setHelpText(i18nc("short translation please", "Replace tabs with spaces when saving the document."));

@@ -6,3 +6,7 @@
 # kdevelop
 .kdev4/
 ktexteditor.kdev4
+
+cmake-build-debug/
+
+\.idea/

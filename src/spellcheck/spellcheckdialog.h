@@ -24,8 +24,8 @@
  *  Boston, MA 02110-1301, USA.
  */
 
-#ifndef __KATE_SPELLCHECKDIALOG_H__
-#define __KATE_SPELLCHECKDIALOG_H__
+#ifndef KATE_SPELLCHECKDIALOG_H
+#define KATE_SPELLCHECKDIALOG_H
 
 #include <QObject>
 
@@ -57,8 +57,6 @@ public:
     ~KateSpellCheckDialog();
 
     void createActions(KActionCollection *);
-
-    void updateActions();
 
     // spellcheck from cursor, selection
 private Q_SLOTS:
@@ -93,7 +91,6 @@ private:
     KTextEditor::Cursor locatePosition(int pos);
 
     KTextEditor::ViewPrivate *m_view;
-    QAction *m_spellcheckSelection;
 
     Sonnet::Speller *m_speller;
     Sonnet::BackgroundChecker *m_backgroundChecker;

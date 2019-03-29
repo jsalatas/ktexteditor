@@ -32,7 +32,6 @@
 #include "kateview.h"
 #include "kateautoindent.h"
 #include "katetextline.h"
-#include "katehighlighthelpers.h"
 #include "katerenderer.h"
 #include "kateregexp.h"
 #include "kateplaintextsearch.h"
@@ -296,8 +295,6 @@ KTextEditor::DocumentPrivate::DocumentPrivate(bool bSingleViewMode,
 
     connect(this, SIGNAL(sigQueryClose(bool*,bool*)), this, SLOT(slotQueryClose_save(bool*,bool*)));
 
-    connect(this, &KTextEditor::DocumentPrivate::textRemoved, this, &KTextEditor::DocumentPrivate::saveEditingPositions);
-    connect(this, &KTextEditor::DocumentPrivate::textInserted, this, &KTextEditor::DocumentPrivate::saveEditingPositions);
     connect(this, SIGNAL(aboutToInvalidateMovingInterfaceContent(KTextEditor::Document*)), this, SLOT(clearEditingPosStack()));
     onTheFlySpellCheckingEnabled(config()->onTheFlySpellCheck());
 }
@@ -348,21 +345,40 @@ KTextEditor::DocumentPrivate::~DocumentPrivate()
 }
 //END
 
-void KTextEditor::DocumentPrivate::saveEditingPositions(KTextEditor::Document *, const KTextEditor::Range &range)
+void KTextEditor::DocumentPrivate::saveEditingPositions(const KTextEditor::Cursor &cursor)
 {
     if (m_editingStackPosition != m_editingStack.size() - 1) {
         m_editingStack.resize(m_editingStackPosition);
     }
-    KTextEditor::MovingInterface *moving = qobject_cast<KTextEditor::MovingInterface *>(this);
-    const auto c = range.start();
-    QSharedPointer<KTextEditor::MovingCursor> mc (moving->newMovingCursor(c));
-    if (!m_editingStack.isEmpty() && c.line() == m_editingStack.top()->line()) {
-        m_editingStack.pop();
+
+    // try to be clever: reuse existing cursors if possible
+    QSharedPointer<KTextEditor::MovingCursor> mc;
+
+    // we might pop last one: reuse that
+    if (!m_editingStack.isEmpty() && cursor.line() == m_editingStack.top()->line()) {
+        mc = m_editingStack.pop();
     }
+
+    // we might expire oldest one, reuse that one, if not already one there
+    // we prefer the other one for reuse, as already on the right line aka in the right block!
+    const int editingStackSizeLimit = 32;
+    if (m_editingStack.size() >= editingStackSizeLimit) {
+        if (mc) {
+            m_editingStack.removeFirst();
+        } else {
+            mc = m_editingStack.takeFirst();
+        }
+    }
+
+    // new cursor needed? or adjust existing one?
+    if (mc) {
+        mc->setPosition(cursor);
+    } else {
+        mc = QSharedPointer<KTextEditor::MovingCursor> (newMovingCursor(cursor));
+    }
+
+    // add new one as top of stack
     m_editingStack.push(mc);
-    if (m_editingStack.size() > s_editingStackSizeLimit) {
-        m_editingStack.removeFirst();
-    }
     m_editingStackPosition = m_editingStack.size() - 1;
 }
 
@@ -729,22 +745,20 @@ bool KTextEditor::DocumentPrivate::insertText(const KTextEditor::Cursor &positio
         }
     }
 
+    // compute expanded column for block mode
+    int positionColumnExpanded = insertColumn;
     const int tabWidth = config()->tabWidth();
-
-    static const QChar newLineChar(QLatin1Char('\n'));
-
-    int insertColumnExpanded = insertColumn;
-    Kate::TextLine l = plainKateTextLine(currentLine);
-    if (l) {
-        insertColumnExpanded = l->toVirtualColumn(insertColumn, tabWidth);
+    if (block) {
+        if (auto l = plainKateTextLine(currentLine)) {
+            positionColumnExpanded = l->toVirtualColumn(insertColumn, tabWidth);
+        }
     }
-    int positionColumnExpanded = insertColumnExpanded;
 
     int pos = 0;
     for (; pos < totalLength; pos++) {
         const QChar &ch = text.at(pos);
 
-        if (ch == newLineChar) {
+        if (ch == QLatin1Char('\n')) {
             // Only perform the text insert if there is text to insert
             if (currentLineStart < pos) {
                 editInsertText(currentLine, insertColumn, text.mid(currentLineStart, pos - currentLineStart));
@@ -756,9 +770,9 @@ bool KTextEditor::DocumentPrivate::insertText(const KTextEditor::Cursor &positio
             }
 
             currentLine++;
-            l = plainKateTextLine(currentLine);
 
             if (block) {
+                auto l = plainKateTextLine(currentLine);
                 if (currentLine == lastLine() + 1) {
                     editInsertLine(currentLine, QString());
                 }
@@ -769,9 +783,6 @@ bool KTextEditor::DocumentPrivate::insertText(const KTextEditor::Cursor &positio
             }
 
             currentLineStart = pos + 1;
-            if (l) {
-                insertColumnExpanded = l->toVirtualColumn(insertColumn, tabWidth);
-            }
         }
     }
 
@@ -991,6 +1002,9 @@ bool KTextEditor::DocumentPrivate::editStart()
 
     editIsRunning = true;
 
+    // no last change cursor at start
+    m_editLastChangeStartCursor = KTextEditor::Cursor::invalid();
+
     m_undoManager->editStart();
 
     foreach (KTextEditor::ViewPrivate *view, m_views) {
@@ -1038,6 +1052,12 @@ bool KTextEditor::DocumentPrivate::editEnd()
         setModified(true);
         emit textChanged(this);
     }
+
+    // remember last change position in the stack, if any
+    // this avoid costly updates for longer editing transactions
+    // before we did that on textInsert/Removed
+    if (m_editLastChangeStartCursor.isValid())
+        saveEditingPositions(m_editLastChangeStartCursor);
 
     editIsRunning = false;
     return true;
@@ -1194,6 +1214,67 @@ bool KTextEditor::DocumentPrivate::wrapText(int startLine, int endLine)
     return true;
 }
 
+bool KTextEditor::DocumentPrivate::wrapParagraph(int first, int last)
+{
+    if (first == last) {
+        return wrapText(first, last);
+    }
+
+    if (first < 0 || last < first) {
+        return false;
+    }
+
+    if (last >= lines() || first > last) {
+        return false;
+    }
+
+    if (!isReadWrite()) {
+        return false;
+    }
+
+    editStart();
+
+    // Because we shrink and expand lines, we need to track the working set by powerful "MovingStuff"
+    std::unique_ptr<KTextEditor::MovingRange> range(newMovingRange(KTextEditor::Range(first, 0, last, 0)));
+    std::unique_ptr<KTextEditor::MovingCursor> curr(newMovingCursor(KTextEditor::Cursor(range->start())));
+
+    // Scan the selected range for paragraphs, whereas each empty line trigger a new paragraph
+    for (int line = first; line <= range->end().line(); ++line) {
+        // Is our first line a somehow filled line?
+        if(plainKateTextLine(first)->firstChar() < 0) {
+            // Fast forward to first non empty line
+            ++first;
+            curr->setPosition(curr->line() + 1, 0);
+            continue;
+        }
+
+        // Is our current line a somehow filled line? If not, wrap the paragraph
+        if (plainKateTextLine(line)->firstChar() < 0) {
+            curr->setPosition(line, 0); // Set on empty line
+            joinLines(first, line - 1);
+            // Don't wrap twice! That may cause a bad result
+            if (!wordWrap()) {
+                wrapText(first, first);
+            }
+            first = curr->line() + 1;
+            line = first;
+        }
+    }
+
+    // If there was no paragraph, we need to wrap now
+    bool needWrap = (curr->line() != range->end().line());
+    if (needWrap && plainKateTextLine(first)->firstChar() != -1) {
+        joinLines(first, range->end().line());
+        // Don't wrap twice! That may cause a bad result
+        if (!wordWrap()) {
+            wrapText(first, first);
+        }
+    }
+
+    editEnd();
+    return true;
+}
+
 bool KTextEditor::DocumentPrivate::editInsertText(int line, int col, const QString &s)
 {
     // verbose debug
@@ -1229,8 +1310,11 @@ bool KTextEditor::DocumentPrivate::editInsertText(int line, int col, const QStri
 
     m_undoManager->slotTextInserted(line, col2, s2);
 
+    // remember last change cursor
+    m_editLastChangeStartCursor = KTextEditor::Cursor(line, col2);
+
     // insert text into line
-    m_buffer->insertText(KTextEditor::Cursor(line, col2), s2);
+    m_buffer->insertText(m_editLastChangeStartCursor, s2);
 
     emit textInserted(this, KTextEditor::Range(line, col2, line, col2 + s2.length()));
 
@@ -1277,8 +1361,11 @@ bool KTextEditor::DocumentPrivate::editRemoveText(int line, int col, int len)
 
     m_undoManager->slotTextRemoved(line, col, oldText);
 
+    // remember last change cursor
+    m_editLastChangeStartCursor = KTextEditor::Cursor(line, col);
+
     // remove text from line
-    m_buffer->removeText(KTextEditor::Range(KTextEditor::Cursor(line, col), KTextEditor::Cursor(line, col + len)));
+    m_buffer->removeText(KTextEditor::Range(m_editLastChangeStartCursor, KTextEditor::Cursor(line, col + len)));
 
     emit textRemoved(this, KTextEditor::Range(line, col, line, col + len), oldText);
 
@@ -1382,6 +1469,9 @@ bool KTextEditor::DocumentPrivate::editWrapLine(int line, int col, bool newLine,
         }
     }
 
+    // remember last change cursor
+    m_editLastChangeStartCursor = KTextEditor::Cursor(line, col);
+
     emit textInserted(this, KTextEditor::Range(line, col, line + 1, 0));
 
     editEnd();
@@ -1449,6 +1539,9 @@ bool KTextEditor::DocumentPrivate::editUnWrapLine(int line, bool removeLine, int
     if (!list.isEmpty()) {
         emit marksChanged(this);
     }
+
+    // remember last change cursor
+    m_editLastChangeStartCursor = KTextEditor::Cursor(line, col);
 
     emit textRemoved(this, KTextEditor::Range(line, col, line + 1, 0), QStringLiteral("\n"));
 
@@ -1519,6 +1612,9 @@ bool KTextEditor::DocumentPrivate::editInsertLine(int line, const QString &s)
     } else {
         rangeInserted.setEnd(KTextEditor::Cursor(line + 1, 0));
     }
+
+    // remember last change cursor
+    m_editLastChangeStartCursor = rangeInserted.start();
 
     emit textInserted(this, rangeInserted);
 
@@ -1612,6 +1708,9 @@ bool KTextEditor::DocumentPrivate::editRemoveLines(int from, int to)
             rangeRemoved.setStart(KTextEditor::Cursor(from - 1, prevLine->length()));
         }
     }
+
+    // remember last change cursor
+    m_editLastChangeStartCursor = rangeRemoved.start();
 
     emit textRemoved(this, rangeRemoved, oldText.join(QStringLiteral("\n")) + QLatin1Char('\n'));
 
@@ -1755,17 +1854,15 @@ QString KTextEditor::DocumentPrivate::highlightingMode() const
 QStringList KTextEditor::DocumentPrivate::highlightingModes() const
 {
     QStringList hls;
-
-    for (int i = 0; i < KateHlManager::self()->highlights(); ++i) {
-        hls << KateHlManager::self()->hlName(i);
+    for (const auto &hl : KateHlManager::self()->modeList()) {
+        hls << hl.name();
     }
-
     return hls;
 }
 
 QString KTextEditor::DocumentPrivate::highlightingModeSection(int index) const
 {
-    return KateHlManager::self()->hlSection(index);
+    return KateHlManager::self()->modeList().at(index).section();
 }
 
 QString KTextEditor::DocumentPrivate::modeSection(int index) const
@@ -2177,14 +2274,6 @@ void KTextEditor::DocumentPrivate::showAndSetOpeningErrorAccess()
 }
 //END: error
 
-#ifdef Q_OS_ANDROID
-int log2(double d) {
-    int result;
-    std::frexp(d, &result);
-    return result-1;
-}
-#endif
-
 void KTextEditor::DocumentPrivate::openWithLineLengthLimitOverride()
 {
     // raise line length limit to the next power of 2
@@ -2412,7 +2501,7 @@ bool KTextEditor::DocumentPrivate::saveFile()
     if (!m_buffer->saveFile(localFilePath())) {
         // add m_file again to dirwatch
         activateDirWatch(oldPath);
-        KMessageBox::error(dialogParent(), i18n("The document could not be saved, as it was not possible to write to %1.\n\nCheck that you have write access to this file or that enough disk space is available.", this->url().toDisplayString(QUrl::PreferLocalFile)));
+        KMessageBox::error(dialogParent(), i18n("The document could not be saved, as it was not possible to write to %1.\nCheck that you have write access to this file or that enough disk space is available.\nThe original file may be lost or damaged. Don't quit the application until the file is successfully written.", this->url().toDisplayString(QUrl::PreferLocalFile)));
         return false;
     }
 
@@ -2448,8 +2537,8 @@ bool KTextEditor::DocumentPrivate::createBackupFile()
     /**
      * backup for local or remote files wanted?
      */
-    const bool backupLocalFiles = (config()->backupFlags() & KateDocumentConfig::LocalFiles);
-    const bool backupRemoteFiles = (config()->backupFlags() & KateDocumentConfig::RemoteFiles);
+    const bool backupLocalFiles = config()->backupOnSaveLocal();
+    const bool backupRemoteFiles = config()->backupOnSaveRemote();
 
     /**
      * early out, before mount check: backup wanted at all?
@@ -3023,9 +3112,8 @@ bool KTextEditor::DocumentPrivate::typeChars(KTextEditor::ViewPrivate *view, con
          */
         bool skipAutobrace = closingBracket == QLatin1Char('\'');
         if ( highlight() && skipAutobrace ) {
-            auto context = highlight()->contextForLocation(this, view->cursorPosition() - Cursor{0, 1});
             // skip adding ' in spellchecked areas, because those are text
-            skipAutobrace = !context || highlight()->attributeRequiresSpellchecking(context->attr);
+            skipAutobrace = highlight()->spellCheckingRequiredForLocation(this, view->cursorPosition() - Cursor{0, 1});
         }
         if (!closingBracket.isNull() && !skipAutobrace ) {
             // add bracket to the view
@@ -3487,7 +3575,7 @@ void KTextEditor::DocumentPrivate::addStartLineCommentToSingleLine(int line, int
     QString commentLineMark = highlight()->getCommentSingleLineStart(attrib);
     int pos = -1;
 
-    if (highlight()->getCommentSingleLinePosition(attrib) == KateHighlighting::CSLPosColumn0) {
+    if (highlight()->getCommentSingleLinePosition(attrib) == KSyntaxHighlighting::CommentPosition::StartOfLine) {
         pos = 0;
         commentLineMark += QLatin1Char(' ');
     } else {
@@ -3606,7 +3694,7 @@ void KTextEditor::DocumentPrivate::addStartStopCommentToSelection(KTextEditor::V
 */
 void KTextEditor::DocumentPrivate::addStartLineCommentToSelection(KTextEditor::ViewPrivate *view, int attrib)
 {
-    const QString commentLineMark = highlight()->getCommentSingleLineStart(attrib) + QLatin1Char(' ');
+    //const QString commentLineMark = highlight()->getCommentSingleLineStart(attrib) + QLatin1Char(' ');
 
     int sl = view->selectionRange().start().line();
     int el = view->selectionRange().end().line();
@@ -3796,8 +3884,8 @@ void KTextEditor::DocumentPrivate::comment(KTextEditor::ViewPrivate *v, uint lin
 
     if (c < ln->length()) {
         startAttrib = ln->attribute(c);
-    } else if (!ln->contextStack().isEmpty()) {
-        startAttrib = highlight()->attribute(ln->contextStack().last());
+    } else if (!ln->attributesList().isEmpty()) {
+        startAttrib = ln->attributesList().back().attributeValue;
     }
 
     bool hasStartLineCommentMark = !(highlight()->getCommentSingleLineStart(startAttrib).isEmpty());
@@ -4233,29 +4321,6 @@ bool KTextEditor::DocumentPrivate::documentReload()
     // does not make sense showing an additional dialog, just hide the message.
     delete m_modOnHdHandler;
 
-    if (m_modOnHd && m_fileChangedDialogsActivated) {
-        QWidget *parentWidget(dialogParent());
-
-        int i = KMessageBox::warningYesNoCancel
-                (parentWidget, reasonedMOHString() + QLatin1String("\n\n") + i18n("What do you want to do?"),
-                    i18n("File Was Changed on Disk"),
-                    KGuiItem(i18n("&Reload File"), QStringLiteral("view-refresh")),
-                    KGuiItem(i18n("&Ignore Changes"), QStringLiteral("dialog-warning")));
-
-        if (i != KMessageBox::Yes) {
-            if (i == KMessageBox::No) {
-                m_modOnHd = false;
-                m_modOnHdReason = OnDiskUnmodified;
-                m_prevModOnHdReason = OnDiskUnmodified;
-                emit modifiedOnDisk(this, m_modOnHd, m_modOnHdReason);
-            }
-
-            // reset some flags only valid for one reload!
-            m_userSetEncodingForNextReload = false;
-            return false;
-        }
-    }
-
     emit aboutToReload(this);
 
     QList<KateDocumentTmpMark> tmp;
@@ -4600,12 +4665,12 @@ void KTextEditor::DocumentPrivate::readVariableLine(QString t, bool onlyViewAndR
             } else if (var == QLatin1String("remove-trailing-space") && checkBoolValue(val, &state)) {
                 qCWarning(LOG_KTE) << i18n("Using deprecated modeline 'remove-trailing-space'. "
                                             "Please replace with 'remove-trailing-spaces modified;', see "
-                                            "http://docs.kde.org/stable/en/applications/kate/config-variables.html#variable-remove-trailing-spaces");
+                                            "https://docs.kde.org/stable5/en/applications/katepart/config-variables.html#variable-remove-trailing-spaces");
                 m_config->setRemoveSpaces(state ? 1 : 0);
             } else if (var == QLatin1String("replace-trailing-space-save") && checkBoolValue(val, &state)) {
                 qCWarning(LOG_KTE) << i18n("Using deprecated modeline 'replace-trailing-space-save'. "
                                             "Please replace with 'remove-trailing-spaces all;', see "
-                                            "http://docs.kde.org/stable/en/applications/kate/config-variables.html#variable-remove-trailing-spaces");
+                                            "https://docs.kde.org/stable5/en/applications/katepart/config-variables.html#variable-remove-trailing-spaces");
                 m_config->setRemoveSpaces(state ? 2 : 0);
             } else if (var == QLatin1String("overwrite-mode") && checkBoolValue(val, &state)) {
                 m_config->setOvr(state);
@@ -4616,7 +4681,7 @@ void KTextEditor::DocumentPrivate::readVariableLine(QString t, bool onlyViewAndR
             } else if (var == QLatin1String("show-tabs") && checkBoolValue(val, &state)) {
                 m_config->setShowTabs(state);
             } else if (var == QLatin1String("show-trailing-spaces") && checkBoolValue(val, &state)) {
-                m_config->setShowSpaces(state);
+                m_config->setShowSpaces(state ? KateDocumentConfig::Trailing : KateDocumentConfig::None);
             } else if (var == QLatin1String("space-indent") && checkBoolValue(val, &state)) {
                 // this is for backward compatibility; see below
                 spaceIndent = state;
@@ -5093,85 +5158,26 @@ bool KTextEditor::DocumentPrivate::checkOverwrite(QUrl u, QWidget *parent)
 // BEGIN ConfigInterface stff
 QStringList KTextEditor::DocumentPrivate::configKeys() const
 {
-    static const QStringList keys = {
-        QLatin1String("backup-on-save-local"),
-        QLatin1String("backup-on-save-suffix"),
-        QLatin1String("backup-on-save-prefix"),
-        QLatin1String("replace-tabs"),
-        QLatin1String("indent-pasted-text"),
-        QLatin1String("tab-width"),
-        QLatin1String("indent-width"),
-        QLatin1String("on-the-fly-spellcheck"),
-    };
-    return keys;
+    /**
+     * expose all internally registered keys of the KateDocumentConfig
+     */
+    return m_config->configKeys();
 }
 
 QVariant KTextEditor::DocumentPrivate::configValue(const QString &key)
 {
-    if (key == QLatin1String("backup-on-save-local")) {
-        return m_config->backupFlags() & KateDocumentConfig::LocalFiles;
-    } else if (key == QLatin1String("backup-on-save-remote")) {
-        return m_config->backupFlags() & KateDocumentConfig::RemoteFiles;
-    } else if (key == QLatin1String("backup-on-save-suffix")) {
-        return m_config->backupSuffix();
-    } else if (key == QLatin1String("backup-on-save-prefix")) {
-        return m_config->backupPrefix();
-    } else if (key == QLatin1String("replace-tabs")) {
-        return m_config->replaceTabsDyn();
-    } else if (key == QLatin1String("indent-pasted-text")) {
-        return m_config->indentPastedText();
-    } else if (key == QLatin1String("tab-width")) {
-        return m_config->tabWidth();
-    } else if (key == QLatin1String("indent-width")) {
-        return m_config->indentationWidth();
-    } else if (key == QLatin1String("on-the-fly-spellcheck")) {
-        return isOnTheFlySpellCheckingEnabled();
-    }
-
-    // return invalid variant
-    return QVariant();
+    /**
+     * just dispatch to internal key => value lookup
+     */
+    return m_config->value(key);
 }
 
 void KTextEditor::DocumentPrivate::setConfigValue(const QString &key, const QVariant &value)
 {
-    if (value.type() == QVariant::String) {
-        if (key == QLatin1String("backup-on-save-suffix")) {
-            m_config->setBackupSuffix(value.toString());
-        } else if (key == QLatin1String("backup-on-save-prefix")) {
-            m_config->setBackupPrefix(value.toString());
-        }
-    } else if (value.type() == QVariant::Bool) {
-        const bool bValue = value.toBool();
-        if (key == QLatin1String("backup-on-save-local")) {
-            uint f = m_config->backupFlags();
-            if (bValue) {
-                f |= KateDocumentConfig::LocalFiles;
-            } else {
-                f ^= KateDocumentConfig::LocalFiles;
-            }
-            m_config->setBackupFlags(f);
-        } else if (key == QLatin1String("backup-on-save-remote")) {
-            uint f = m_config->backupFlags();
-            if (bValue) {
-                f |= KateDocumentConfig::RemoteFiles;
-            } else {
-                f ^= KateDocumentConfig::RemoteFiles;
-            }
-            m_config->setBackupFlags(f);
-        } else if (key == QLatin1String("replace-tabs")) {
-            m_config->setReplaceTabsDyn(bValue);
-        } else if (key == QLatin1String("indent-pasted-text")) {
-            m_config->setIndentPastedText(bValue);
-        } else if (key == QLatin1String("on-the-fly-spellcheck")) {
-            onTheFlySpellCheckingEnabled(bValue);
-        }
-    } else if (value.canConvert(QVariant::Int)) {
-        if (key == QLatin1String("tab-width")) {
-            config()->setTabWidth(value.toInt());
-        } else if (key == QLatin1String("indent-width")) {
-            config()->setIndentationWidth(value.toInt());
-        }
-    }
+    /**
+     * just dispatch to internal key + value set
+     */
+    m_config->setValue(key, value);
 }
 
 //END KTextEditor::ConfigInterface
@@ -5874,38 +5880,7 @@ QStringList KTextEditor::DocumentPrivate::embeddedHighlightingModes() const
 
 QString KTextEditor::DocumentPrivate::highlightingModeAt(const KTextEditor::Cursor &position)
 {
-    Kate::TextLine kateLine = kateTextLine(position.line());
-
-//   const QVector< short >& attrs = kateLine->ctxArray();
-//   qCDebug(LOG_KTE) << "----------------------------------------------------------------------";
-//   foreach( short a, attrs ) {
-//     qCDebug(LOG_KTE) << a;
-//   }
-//   qCDebug(LOG_KTE) << "----------------------------------------------------------------------";
-//   qCDebug(LOG_KTE) << "col: " << position.column() << " lastchar:" << kateLine->lastChar() << " length:" << kateLine->length() << "global mode:" << highlightingMode();
-
-    int len = kateLine->length();
-    int pos = position.column();
-    if (pos >= len) {
-        const Kate::TextLineData::ContextStack &ctxs = kateLine->contextStack();
-        int ctxcnt = ctxs.count();
-        if (ctxcnt == 0) {
-            return highlightingMode();
-        }
-        int ctx = ctxs.at(ctxcnt - 1);
-        if (ctx == 0) {
-            return highlightingMode();
-        }
-        return KateHlManager::self()->nameForIdentifier(highlight()->hlKeyForContext(ctx));
-    }
-
-    int attr = kateLine->attribute(pos);
-    if (attr == 0) {
-        return mode();
-    }
-
-    return KateHlManager::self()->nameForIdentifier(highlight()->hlKeyForAttrib(attr));
-
+    return highlight()->higlightingModeForLocation(this, position);
 }
 
 Kate::SwapFile *KTextEditor::DocumentPrivate::swapFile()
@@ -5939,8 +5914,11 @@ int KTextEditor::DocumentPrivate::defStyleNum(int line, int column)
     if (column < tl->length()) {
         attribute = tl->attribute(column);
     } else if (column == tl->length()) {
-        KateHlContext *context = tl->contextStack().isEmpty() ? highlight()->contextNum(0) : highlight()->contextNum(tl->contextStack().back());
-        attribute = context->attr;
+        if (!tl->attributesList().isEmpty()) {
+            attribute = tl->attributesList().back().attributeValue;
+        } else {
+            return -1;
+        }
     } else {
         return -1;
     }

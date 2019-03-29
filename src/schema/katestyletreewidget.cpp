@@ -155,7 +155,7 @@ KateStyleTreeWidget::KateStyleTreeWidget(QWidget *parent, bool showUseDefaults)
     docfont = KateRendererConfig::global()->font();
 
     QPalette pal = viewport()->palette();
-    pal.setColor(QPalette::Background, bgcol);
+    pal.setColor(QPalette::Window, bgcol);
     viewport()->setPalette(pal);
 }
 
@@ -547,12 +547,12 @@ void KateStyleTreeWidgetItem::updateStyle()
         actualStyle->clearProperty(QTextFormat::FontStrikeOut);
     }
 
-    if (currentStyle->hasProperty(QTextFormat::FontUnderline)) {
+    if (currentStyle->hasProperty(QTextFormat::TextUnderlineStyle)) {
         if (currentStyle->fontUnderline() != actualStyle->fontUnderline()) {
             actualStyle->setFontUnderline(currentStyle->fontUnderline());
         }
     } else {
-        actualStyle->clearProperty(QTextFormat::FontUnderline);
+        actualStyle->clearProperty(QTextFormat::TextUnderlineStyle);
     }
 
     if (currentStyle->hasProperty(CustomProperties::Outline)) {

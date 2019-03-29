@@ -117,7 +117,10 @@ bool DocumentCursor::atStartOfDocument() const
 
 bool DocumentCursor::atEndOfDocument() const
 {
-    return m_cursor == document()->documentEnd();
+    // avoid costly lineLength computation if we are not in the last line
+    // this is called often e.g. during search & replace, >> 2% of the total costs
+    const auto lastLine = document()->lines() - 1;
+    return line() == lastLine && column() == document()->lineLength(lastLine);
 }
 
 bool DocumentCursor::gotoNextLine()
@@ -153,7 +156,7 @@ bool DocumentCursor::move(int chars, WrapBehavior wrapBehavior)
     // create temporary cursor to modify
     Cursor c(m_cursor);
 
-    // fowards?
+    // forwards?
     if (chars > 0) {
         // cache lineLength to minimize calls of KTextEditor::DocumentPrivate::lineLength(), as
         // results in locating the correct block in the text buffer every time,
@@ -166,7 +169,7 @@ bool DocumentCursor::move(int chars, WrapBehavior wrapBehavior)
         if (wrapBehavior == Wrap && c.column() > lineLength) {
             c.setColumn(lineLength);
         }
-        
+
         while (chars != 0) {
             if (wrapBehavior == Wrap) {
                 const int advance = qMin(lineLength - c.column(), chars);
@@ -190,7 +193,7 @@ bool DocumentCursor::move(int chars, WrapBehavior wrapBehavior)
                 chars = 0;
             }
         }
-    }    
+    }
 
     // backwards?
     else {

@@ -27,12 +27,14 @@
 
 #include <ktexteditor_export.h>
 
+#include <KSyntaxHighlighting/State>
+
 namespace Kate
 {
 
 /**
  * Class representing a single text line.
- * For efficience reasons, not only pure text is stored here, but also additional data.
+ * For efficiency reasons, not only pure text is stored here, but also additional data.
  * Will be only accessed over shared pointers.
  */
 class KTEXTEDITOR_EXPORT TextLineData
@@ -44,11 +46,6 @@ class KTEXTEDITOR_EXPORT TextLineData
 
 public:
     /**
-     * Context stack
-     */
-    typedef QVector<short> ContextStack;
-
-    /**
      * Attribute storage
      */
     class Attribute
@@ -59,13 +56,11 @@ public:
          * @param _offset offset
          * @param _length length
          * @param _attributeValue attribute value
-         * @param _foldingValue folding value
          */
-        Attribute(int _offset = 0, int _length = 0, short _attributeValue = 0, short _foldingValue = 0)
+        explicit Attribute(int _offset = 0, int _length = 0, short _attributeValue = 0)
             : offset(_offset)
             , length(_length)
             , attributeValue(_attributeValue)
-            , foldingValue(_foldingValue)
         {
         }
 
@@ -83,23 +78,45 @@ public:
          * attribute value (to encode type of this range)
          */
         short attributeValue;
+    };
+
+    /**
+     * Folding storage
+     */
+    class Folding
+    {
+    public:
+        /**
+         * Construct folding.
+         * @param _offset offset of the folding start
+         * @param _foldingValue positive ones start foldings, negative ones end them
+         */
+        Folding(int _offset, int _foldingValue)
+            : offset(_offset)
+            , foldingValue(_foldingValue)
+        {
+        }
 
         /**
-         * folding value (begin/end type)
+         * offset
          */
-        short foldingValue;
+        int offset = 0;
+
+        /**
+         * positive ones start foldings, negative ones end them
+         */
+        int foldingValue = 0;
     };
 
     /**
      * Flags of TextLineData
      */
     enum Flags {
-        flagHlContinue = 1,
-        flagAutoWrapped = 2,
-        flagFoldingStartAttribute = 4,
-        flagFoldingStartIndentation = 8,
-        flagLineModified = 16,
-        flagLineSavedOnDisk = 32
+        flagAutoWrapped = 1,
+        flagFoldingStartAttribute = 2,
+        flagFoldingStartIndentation = 4,
+        flagLineModified = 8,
+        flagLineSavedOnDisk = 16
     };
 
     /**
@@ -276,16 +293,6 @@ public:
     }
 
     /**
-     * Returns \e true, if the line's hl-continue flag is set, otherwise returns
-     * \e false. The hl-continue flag is set in the hl-definition files.
-     * @return hl-continue flag is set
-     */
-    bool hlLineContinue() const
-    {
-        return m_flags & flagHlContinue;
-    }
-
-    /**
      * Returns \e true, if the line was automagically wrapped, otherwise returns
      * \e false.
      * @return was this line auto-wrapped?
@@ -368,18 +375,18 @@ public:
      * context stack
      * @return context stack
      */
-    const ContextStack &contextStack() const
+    const KSyntaxHighlighting::State &highlightingState() const
     {
-        return m_contextStack;
+        return m_highlightingState;
     }
 
     /**
      * Sets the syntax highlight context number
      * @param val new context array
      */
-    void setContextStack(const ContextStack &val)
+    void setHighlightingState(const KSyntaxHighlighting::State &val)
     {
-        m_contextStack = val;
+        m_highlightingState = val;
     }
 
     /**
@@ -389,11 +396,12 @@ public:
     void addAttribute(const Attribute &attribute);
 
     /**
-     * Clear attributes of this line
+     * Clear attributes and foldings of this line
      */
-    void clearAttributes()
+    void clearAttributesAndFoldings()
     {
         m_attributesList.clear();
+        m_foldings.clear();
     }
 
     /**
@@ -406,6 +414,25 @@ public:
     }
 
     /**
+     * Accessor to foldings
+     * @return foldings of this line
+     */
+    const std::vector<Folding> &foldings() const
+    {
+        return m_foldings;
+    }
+
+    /**
+     * Add new folding at end of foldings stored in this line
+     * @param offset offset of folding start
+     * @param folding folding to add, positive to open, negative to close
+     */
+    void addFolding(int offset, int folding)
+    {
+        m_foldings.emplace_back(offset,folding);
+    }
+
+    /**
      * Gets the attribute at the given position
      * use KRenderer::attributes  to get the KTextAttribute for this.
      *
@@ -413,19 +440,6 @@ public:
      * @return value of attribute
      */
     short attribute(int pos) const;
-
-    /**
-     * set hl continue flag
-     * @param cont continue flag?
-     */
-    void setHlLineContinue(bool cont)
-    {
-        if (cont) {
-            m_flags = m_flags | flagHlContinue;
-        } else {
-            m_flags = m_flags & ~ flagHlContinue;
-        }
-    }
 
     /**
      * set auto-wrapped property
@@ -463,9 +477,14 @@ private:
     QVector<Attribute> m_attributesList;
 
     /**
-     * context stack of this line
+     * foldings of this line
      */
-    ContextStack m_contextStack;
+    std::vector<Folding> m_foldings;
+
+    /**
+     * current highlighting state
+     */
+    KSyntaxHighlighting::State m_highlightingState;
 
     /**
      * flags of this line

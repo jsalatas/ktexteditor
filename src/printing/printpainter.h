@@ -20,8 +20,8 @@
  *  Boston, MA 02110-1301, USA.
  */
 
-#ifndef __KATE_PRINTER_PAINTER_H__
-#define __KATE_PRINTER_PAINTER_H__
+#ifndef KATE_PRINT_PAINTER_H
+#define KATE_PRINT_PAINTER_H
 
 #include <QString>
 #include <QColor>
@@ -58,6 +58,9 @@ class PrintPainter
 public:
     PrintPainter(KTextEditor::DocumentPrivate *doc, KTextEditor::ViewPrivate *view);
     ~PrintPainter();
+
+    PrintPainter(const PrintPainter &) = delete;
+    PrintPainter& operator=(const PrintPainter &) = delete;
 
     void paint(QPrinter *printer) const;
 

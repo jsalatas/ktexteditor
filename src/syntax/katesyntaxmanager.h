@@ -19,12 +19,10 @@
    Boston, MA 02110-1301, USA.
 */
 
-#ifndef __KATE_SYNTAXMANAGER_H__
-#define __KATE_SYNTAXMANAGER_H__
+#pragma once
 
 #include "katetextline.h"
 #include "kateextendedattribute.h"
-#include "katesyntaxdocument.h"
 
 #include <KSyntaxHighlighting/Definition>
 #include <KSyntaxHighlighting/Repository>
@@ -40,7 +38,8 @@
 #include <QStringList>
 #include <QPointer>
 #include <QDate>
-#include <QLinkedList>
+
+#include <memory>
 
 class KateHighlighting;
 
@@ -50,14 +49,8 @@ class KateHlManager : public QObject
 
 public:
     KateHlManager();
-    ~KateHlManager();
 
     static KateHlManager *self();
-
-    KateSyntaxDocument *syntaxDocument()
-    {
-        return &syntax;
-    }
 
     inline KConfig *getKConfig()
     {
@@ -67,45 +60,16 @@ public:
     KateHighlighting *getHl(int n);
     int nameFind(const QString &name);
 
-    QString identifierForName(const QString &);
-    /**
-     * Returns the mode name for a given identifier, as e.g.
-     * returned by KateHighlighting::hlKeyForAttrib().
-     */
-    QString nameForIdentifier(const QString &);
-
     void getDefaults(const QString &schema, KateAttributeList &, KConfig *cfg = nullptr);
     void setDefaults(const QString &schema, KateAttributeList &, KConfig *cfg = nullptr);
 
-    int highlights();
-    QString hlName(int n);
-    QString hlNameTranslated(int n);
-    QString hlSection(int n);
-    bool hlHidden(int n);
-
-    void incDynamicCtxs()
-    {
-        ++dynamicCtxsCount;
-    }
-    int countDynamicCtxs()
-    {
-        return dynamicCtxsCount;
-    }
-    void setForceNoDCReset(bool b)
-    {
-        forceNoDCReset = b;
-    }
-
-    // be carefull: all documents hl should be invalidated after having successfully called this method!
-    bool resetDynamicCtxs();
-    
     void reload();
 
 Q_SIGNALS:
     void changed();
 
 //
-// methodes to get the default style count + names
+// methods to get the default style count + names
 //
 public:
     /**
@@ -135,33 +99,28 @@ public:
         return m_repository.definitions();
     }
 
-private:
-    friend class KateHighlighting;
-
     /**
-     * Generate the list of hl modes, store them in myModeList
+     * Get repository.
+     * @return repository
      */
-    void setupModeList();
+    KSyntaxHighlighting::Repository &repository()
+    {
+        return m_repository;
+    }
 
+private:
     /**
      * Syntax highlighting definitions.
      */
     KSyntaxHighlighting::Repository m_repository;
 
-    // This list owns objects it holds, thus they should be deleted when the object is removed
-    QList<KateHighlighting *> hlList;
-    // This hash does not own the objects it holds, thus they should not be deleted
-    QHash<QString, KateHighlighting *> hlDict;
+    /**
+     * All loaded highlightings.
+     */
+    QHash<QString, std::shared_ptr<KateHighlighting>> m_hlDict;
 
+    /**
+     * katesyntaxhighlightingrc config file
+     */
     KConfig m_config;
-    QStringList commonSuffixes;
-
-    KateSyntaxDocument syntax;
-
-    int dynamicCtxsCount = 0;
-    QTime lastCtxsReset;
-    bool forceNoDCReset = false;
 };
-
-#endif
-

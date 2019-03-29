@@ -23,8 +23,8 @@
  *  Boston, MA 02110-1301, USA.
  */
 
-#ifndef __KATE_DIALOGS_H__
-#define __KATE_DIALOGS_H__
+#ifndef KATE_DIALOGS_H
+#define KATE_DIALOGS_H
 
 #include "katehighlight.h"
 #include "kateviewhelpers.h"
@@ -87,17 +87,26 @@ class KateGotoBar : public KateViewBarWidget
 public:
     explicit KateGotoBar(KTextEditor::View *view, QWidget *parent = nullptr);
 
+    void closed() override;
+
+public Q_SLOTS:
     void updateData();
 
 protected Q_SLOTS:
     void gotoLine();
+    void gotoClipboard();
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
+    bool eventFilter(QObject *, QEvent *) override;
+    void showEvent(QShowEvent *event) override;
 
 private:
     KTextEditor::View *const m_view;
-    QSpinBox *gotoRange;
+    QSpinBox *m_gotoRange = nullptr;
+    QToolButton *m_modifiedUp = nullptr;
+    QToolButton *m_modifiedDown = nullptr;
+    int m_wheelDelta = 0; // To accumulate "wheel-deltas" to become e.g. a touch-pad usable
 };
 
 class KateDictionaryBar : public KateViewBarWidget
@@ -303,26 +312,6 @@ private:
     Ui::OpenSaveConfigWidget *ui;
     Ui::OpenSaveConfigAdvWidget *uiadv;
     ModeConfigPage *modeConfigPage;
-};
-
-class KateHlDownloadDialog: public QDialog
-{
-    Q_OBJECT
-
-public:
-    KateHlDownloadDialog(QWidget *parent, const char *name, bool modal);
-    ~KateHlDownloadDialog();
-
-private:
-    static unsigned parseVersion(const QString &);
-    class QTreeWidget  *list;
-    class QString listData;
-    KIO::TransferJob *transferJob;
-    QPushButton *m_installButton;
-
-private Q_SLOTS:
-    void listDataReceived(KIO::Job *, const QByteArray &data);
-    void slotInstall();
 };
 
 /**

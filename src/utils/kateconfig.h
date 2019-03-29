@@ -17,14 +17,18 @@
    Boston, MA 02110-1301, USA.
 */
 
-#ifndef __KATE_CONFIG_H__
-#define __KATE_CONFIG_H__
+#ifndef KATE_CONFIG_H
+#define KATE_CONFIG_H
 
 #include <ktexteditor_export.h>
 
 #include <ktexteditor/markinterface.h>
 #include "ktexteditor/view.h"
 #include <KEncodingProber>
+
+#include <functional>
+#include <map>
+#include <memory>
 
 #include <QBitRef>
 #include <QColor>
@@ -48,19 +52,8 @@ class QTextCodec;
 /**
  * Base Class for the Kate Config Classes
  */
-class KateConfig
+class KTEXTEDITOR_EXPORT KateConfig
 {
-public:
-    /**
-     * Default Constructor
-     */
-    KateConfig();
-
-    /**
-     * Virtual Destructor
-     */
-    virtual ~KateConfig();
-
 public:
     /**
      * start some config changes
@@ -76,13 +69,182 @@ public:
      */
     void configEnd();
 
+    /**
+     * global config?
+     * @return global config object?
+     */
+    bool isGlobal() const
+    {
+        return !m_parent;
+    }
+
+    /**
+     * All known config keys.
+     * This will use the knowledge about all registered keys of the global object.
+     * @return all known config keys
+     */
+    QStringList configKeys() const
+    {
+        return m_parent ? m_parent->configKeys() : *m_configKeys.get();
+    }
+
+    /**
+     * Get a config value.
+     * @param key config key, aka enum from KateConfig* classes
+     * @return value for the wanted key, will assert if key is not valid
+     */
+    QVariant value(const int key) const;
+
+    /**
+     * Set a config value.
+     * Will assert if key is invalid.
+     * Might not alter the value if given value fails validation.
+     * @param key config key, aka enum from KateConfig* classes
+     * @param value value to set
+     * @return value set?
+     */
+    bool setValue(const int key, const QVariant &value);
+
+    /**
+     * Get a config value for the string key.
+     * @param key config key, aka commandName from KateConfig* classes
+     * @return value for the wanted key, will return invalid variant if key invalid
+     */
+    QVariant value(const QString &key) const;
+
+    /**
+     * Set a config value.
+     * Will ignore set if key not valid
+     * Might not alter the value if given value fails validation.
+     * @param key config key, aka commandName from KateConfig* classes
+     * @param value value to set
+     * @return value set?
+     */
+    bool setValue(const QString &key, const QVariant &value);
+
 protected:
+    /**
+     * Construct a KateConfig.
+     * @param parent parent config object, if any
+     */
+    KateConfig(const KateConfig *parent = nullptr);
+
+    /**
+     * Virtual Destructor
+     */
+    virtual ~KateConfig();
+
+    /**
+     * One config entry.
+     */
+    class ConfigEntry {
+    public:
+        /**
+         * Construct one config entry.
+         * @param enumId value of the enum for this config entry
+         * @param configId value of the key for the KConfig file for this config entry
+         * @param command command name
+         * @param defaultVal default value
+         * @param valid validator function, default none
+         */
+        ConfigEntry(int enumId, const char *configId, QString command, QVariant defaultVal, std::function<bool(const QVariant &)> valid = nullptr)
+            : enumKey(enumId)
+            , configKey(configId)
+            , commandName(command)
+            , defaultValue(defaultVal)
+            , value(defaultVal)
+            , validator(valid)
+        {
+        }
+
+        /**
+         * Enum key for this config entry, shall be unique
+         */
+        const int enumKey;
+
+        /**
+         * KConfig entry key for this config entry, shall be unique in its group
+         * e.g. "Tab Width"
+         */
+         const char * const configKey;
+
+         /**
+          * Command name as used in e.g. ConfigInterface or modeline/command line
+          * e.g. tab-width
+          */
+         const QString commandName;
+
+        /**
+         * Default value if nothing configured
+         */
+        const QVariant defaultValue;
+
+        /**
+         * concrete value, per default == defaultValue
+         */
+        QVariant value;
+
+        /**
+         * a validator function, only if this returns true we accept a value for the entry
+         * is ignored if not set
+         */
+        std::function<bool(const QVariant &)> validator;
+    };
+
+    /**
+     * Read all config entries from given config group
+     * @param config config group to read from
+     */
+    void readConfigEntries(const KConfigGroup &config);
+
+    /**
+     * Write all config entries to given config group
+     * @param config config group to write to
+     */
+    void writeConfigEntries(KConfigGroup &config) const;
+
+    /**
+     * Register a new config entry.
+     * Used by the sub classes to register all there known ones.
+     * @param entry new entry to add
+     */
+    void addConfigEntry(ConfigEntry &&entry);
+
+    /**
+     * Finalize the config entries.
+     * Called by the sub classes after all entries are registered
+     */
+    void finalizeConfigEntries();
+
     /**
      * do the real update
      */
     virtual void updateConfig() = 0;
 
 private:
+    /**
+     * Get full map of config entries, aka the m_configEntries of the top config object
+     * @return full map with all config entries
+     */
+    const std::map<int, ConfigEntry> &fullConfigEntries () const
+    {
+        return m_parent ? m_parent->fullConfigEntries() : m_configEntries;
+    }
+    /**
+     * Get hash of config entries, aka the m_configKeyToEntry of the top config object
+     * @return full hash with all config entries
+     */
+    const QHash<QString, const ConfigEntry *> &fullConfigKeyToEntry () const
+    {
+        return m_parent ? m_parent->fullConfigKeyToEntry() : *m_configKeyToEntry.get();
+    }
+
+private:
+    /**
+     * parent config object, if any
+     */
+    const KateConfig * const m_parent = nullptr;
+
     /**
      * recursion depth
      */
@@ -92,6 +254,25 @@ private:
      * is a config session running
      */
     bool configIsRunning = false;
+
+    /**
+     * two cases:
+     *   - we have m_parent == nullptr => this contains all known config entries
+     *   - we have m_parent != nullptr => this contains all set config entries for this level of configuration
+     *
+     * uses a map ATM for deterministic iteration e.g. for read/writeConfig
+     */
+    std::map<int, ConfigEntry> m_configEntries;
+
+    /**
+     * All known config keys, filled only for the object with m_parent == nullptr
+     */
+    std::unique_ptr<QStringList> m_configKeys;
+
+    /**
+     * Hash of config keys => config entry, filled only for the object with m_parent == nullptr
+     */
+    std::unique_ptr<QHash<QString, const ConfigEntry *>> m_configKeyToEntry;
 };
 
 class KTEXTEDITOR_EXPORT KateGlobalConfig : public KateConfig
@@ -104,16 +285,26 @@ private:
      */
     KateGlobalConfig();
 
-    /**
-     * Destructor
-     */
-    ~KateGlobalConfig() override;
-
 public:
     static KateGlobalConfig *global()
     {
         return s_global;
     }
+
+    /**
+     * Known config entries
+     */
+    enum ConfigEntryTypes {
+        /**
+         * Encoding prober
+         */
+        EncodingProberType,
+
+        /**
+         * Fallback encoding
+         */
+        FallbackEncoding
+    };
 
 public:
     /**
@@ -132,18 +323,30 @@ protected:
 public:
     KEncodingProber::ProberType proberType() const
     {
-        return m_proberType;
+        return KEncodingProber::ProberType(value(EncodingProberType).toInt());
     }
 
-    void setProberType(KEncodingProber::ProberType proberType);
+    bool setProberType(KEncodingProber::ProberType type)
+    {
+        return setValue(EncodingProberType, type);
+    }
 
+    /**
+     * Fallback codec.
+     * Based on fallback encoding.
+     * @return fallback codec
+     */
     QTextCodec *fallbackCodec() const;
-    const QString &fallbackEncoding() const;
-    bool setFallbackEncoding(const QString &encoding);
 
-private:
-    KEncodingProber::ProberType m_proberType;
-    QString m_fallbackEncoding;
+    QString fallbackEncoding() const
+    {
+        return value(FallbackEncoding).toString();
+    }
+
+    bool setFallbackEncoding(const QString &encoding)
+    {
+        return setValue(FallbackEncoding, encoding);
+    }
 
 private:
     static KateGlobalConfig *s_global;
@@ -157,27 +360,180 @@ private:
     KateDocumentConfig();
 
 public:
-    KateDocumentConfig(const KConfigGroup &cg);
-
     /**
      * Construct a DocumentConfig
      */
-    KateDocumentConfig(KTextEditor::DocumentPrivate *doc);
-
-    /**
-     * Cu DocumentConfig
-     */
-    ~KateDocumentConfig() override;
+    explicit KateDocumentConfig(KTextEditor::DocumentPrivate *doc);
 
     inline static KateDocumentConfig *global()
     {
         return s_global;
     }
 
-    inline bool isGlobal() const
-    {
-        return (this == global());
-    }
+    /**
+     * Known config entries
+     */
+    enum ConfigEntryTypes {
+        /**
+         * Tabulator width
+         */
+        TabWidth,
+
+        /**
+         * Indentation width
+         */
+        IndentationWidth,
+
+        /**
+         * On-the-fly spellcheck enabled?
+         */
+        OnTheFlySpellCheck,
+
+        /**
+         * Indent pasted text?
+         */
+        IndentOnTextPaste,
+
+        /**
+         * Replace tabs with spaces?
+         */
+        ReplaceTabsWithSpaces,
+
+        /**
+         * Backup files for local files?
+         */
+        BackupOnSaveLocal,
+
+        /**
+         * Backup files for remote files?
+         */
+        BackupOnSaveRemote,
+
+        /**
+         * Prefix for backup files
+         */
+        BackupOnSavePrefix,
+
+        /**
+         * Suffix for backup files
+         */
+        BackupOnSaveSuffix,
+
+        /**
+         * Indentation mode, like "normal"
+         */
+        IndentationMode,
+
+        /**
+         * Tab handling, like indent, insert tab, smart
+         */
+        TabHandlingMode,
+
+        /**
+         * Static word wrap?
+         */
+        StaticWordWrap,
+
+        /**
+         * Static word wrap column
+         */
+        StaticWordWrapColumn,
+
+        /**
+         * PageUp/Down moves cursor?
+         */
+        PageUpDownMovesCursor,
+
+        /**
+         * Smart Home key?
+         */
+        SmartHome,
+
+        /**
+         * Show Tabs?
+         */
+        ShowTabs,
+
+        /**
+         * Indent on tab?
+         */
+        IndentOnTab,
+
+        /**
+         * Keep extra space?
+         */
+        KeepExtraSpaces,
+
+        /**
+         * Backspace key indents?
+         */
+        BackspaceIndents,
+
+        /**
+         * Show spaces mode like none, all, ...
+         */
+        ShowSpacesMode,
+
+        /**
+         * Trailing Marker Size
+         */
+        TrailingMarkerSize,
+
+        /**
+         * Remove spaces mode
+         */
+        RemoveSpacesMode,
+
+        /**
+         * Ensure newline at end of file
+         */
+        NewlineAtEOF,
+
+        /**
+         * Overwrite mode?
+         */
+        OverwriteMode,
+
+        /**
+         * Encoding
+         */
+        Encoding,
+
+        /**
+         * End of line mode: dos, mac, unix
+         */
+        EndOfLine,
+
+        /**
+         * Allow EOL detection
+         */
+        AllowEndOfLineDetection,
+
+        /**
+         * Use Byte Order Mark
+         */
+        ByteOrderMark,
+
+        /**
+         * Swap file mode
+         */
+        SwapFile,
+
+        /**
+         * Swap file directory
+         */
+        SwapFileDirectory,
+
+        /**
+         * Swap file sync interval
+         */
+        SwapFileSyncInterval,
+
+        /**
+         * Line length limit
+         */
+        LineLengthLimit
+    };
 
 public:
     /**
@@ -194,14 +550,105 @@ protected:
     void updateConfig() override;
 
 public:
-    int tabWidth() const;
-    void setTabWidth(int tabWidth);
+    int tabWidth() const
+    {
+        return value(TabWidth).toInt();
+    }
 
-    int indentationWidth() const;
-    void setIndentationWidth(int indentationWidth);
+    void setTabWidth(int tabWidth)
+    {
+        setValue(TabWidth, QVariant(tabWidth));
+    }
 
-    const QString &indentationMode() const;
-    void setIndentationMode(const QString &identationMode);
+    int indentationWidth() const
+    {
+        return value(IndentationWidth).toInt();
+    }
+
+    void setIndentationWidth(int indentationWidth)
+    {
+        setValue(IndentationWidth, QVariant(indentationWidth));
+    }
+
+    bool onTheFlySpellCheck() const
+    {
+        return value(OnTheFlySpellCheck).toBool();
+    }
+
+    void setOnTheFlySpellCheck(bool on)
+    {
+        setValue(OnTheFlySpellCheck, QVariant(on));
+    }
+
+    bool indentPastedText() const
+    {
+        return value(IndentOnTextPaste).toBool();
+    }
+
+    void setIndentPastedText(bool on)
+    {
+        setValue(IndentOnTextPaste, QVariant(on));
+    }
+
+    bool replaceTabsDyn() const
+    {
+        return value(ReplaceTabsWithSpaces).toBool();
+    }
+
+    void setReplaceTabsDyn(bool on)
+    {
+        setValue(ReplaceTabsWithSpaces, QVariant(on));
+    }
+
+    bool backupOnSaveLocal() const
+    {
+        return value(BackupOnSaveLocal).toBool();
+    }
+
+    void setBackupOnSaveLocal(bool on)
+    {
+        setValue(BackupOnSaveLocal, QVariant(on));
+    }
+
+    bool backupOnSaveRemote() const
+    {
+        return value(BackupOnSaveRemote).toBool();
+    }
+
+    void setBackupOnSaveRemote(bool on)
+    {
+        setValue(BackupOnSaveRemote, QVariant(on));
+    }
+
+    QString backupPrefix() const
+    {
+        return value(BackupOnSavePrefix).toString();
+    }
+
+    void setBackupPrefix(const QString &prefix)
+    {
+        setValue(BackupOnSavePrefix, QVariant(prefix));
+    }
+
+    QString backupSuffix() const
+    {
+        return value(BackupOnSaveSuffix).toString();
+    }
+
+    void setBackupSuffix(const QString &suffix)
+    {
+        setValue(BackupOnSaveSuffix, QVariant(suffix));
+    }
+
+    QString indentationMode() const
+    {
+        return value(IndentationMode).toString();
+    }
+
+    void setIndentationMode(const QString &identationMode)
+    {
+        setValue(IndentationMode, identationMode);
+    }
 
     enum TabHandling {
         tabInsertsTab = 0,
@@ -209,41 +656,111 @@ public:
         tabSmart = 2      //!< indents in leading space, otherwise inserts tab
     };
 
-    uint tabHandling() const;
-    void setTabHandling(uint tabHandling);
+    enum WhitespaceRendering {
+        None,
+        Trailing,
+        All
+    };
 
-    bool wordWrap() const;
-    void setWordWrap(bool on);
+    int tabHandling() const
+    {
+        return value(TabHandlingMode).toInt();
+    }
 
-    int wordWrapAt() const;
-    void setWordWrapAt(int col);
+    void setTabHandling(int tabHandling)
+    {
+        setValue(TabHandlingMode, tabHandling);
+    }
 
-    bool pageUpDownMovesCursor() const;
-    void setPageUpDownMovesCursor(bool on);
+    bool wordWrap() const
+    {
+        return value(StaticWordWrap).toBool();
+    }
 
-    void setKeepExtraSpaces(bool on);
-    bool keepExtraSpaces() const;
+    void setWordWrap(bool on)
+    {
+        setValue(StaticWordWrap, on);
+    }
 
-    void setIndentPastedText(bool on);
-    bool indentPastedText() const;
+    int wordWrapAt() const
+    {
+        return value(StaticWordWrapColumn).toInt();
+    }
 
-    void setBackspaceIndents(bool on);
-    bool backspaceIndents() const;
+    void setWordWrapAt(int col)
+    {
+        setValue(StaticWordWrapColumn, col);
+    }
 
-    void setSmartHome(bool on);
-    bool smartHome() const;
+    bool pageUpDownMovesCursor() const
+    {
+        return value(PageUpDownMovesCursor).toBool();
+    }
 
-    void setShowTabs(bool on);
-    bool showTabs() const;
+    void setPageUpDownMovesCursor(bool on)
+    {
+        setValue(PageUpDownMovesCursor, on);
+    }
 
-    void setShowSpaces(bool on);
-    bool showSpaces() const;
+    void setKeepExtraSpaces(bool on)
+    {
+        setValue(KeepExtraSpaces, on);
+    }
 
-	void setMarkerSize(uint markerSize);
-	uint markerSize() const;
+    bool keepExtraSpaces() const
+    {
+        return value(KeepExtraSpaces).toBool();
+    }
 
-    void setReplaceTabsDyn(bool on);
-    bool replaceTabsDyn() const;
+    void setBackspaceIndents(bool on)
+    {
+        setValue(BackspaceIndents, on);
+    }
+
+    bool backspaceIndents() const
+    {
+        return value(BackspaceIndents).toBool();
+    }
+
+    void setSmartHome(bool on)
+    {
+        setValue(SmartHome, on);
+    }
+
+    bool smartHome() const
+    {
+        return value(SmartHome).toBool();
+    }
+
+    void setShowTabs(bool on)
+    {
+        setValue(ShowTabs, on);
+    }
+
+    bool showTabs() const
+    {
+        return value(ShowTabs).toBool();
+    }
+
+    void setShowSpaces(WhitespaceRendering mode)
+    {
+        setValue(ShowSpacesMode, mode);
+    }
+
+    WhitespaceRendering showSpaces() const
+    {
+        return WhitespaceRendering(value(ShowSpacesMode).toInt());
+    }
+
+    void setMarkerSize(int markerSize)
+    {
+        setValue(TrailingMarkerSize, markerSize);
+    }
+
+    int markerSize() const
+    {
+        return value(TrailingMarkerSize).toInt();
+    }
 
     /**
      * Remove trailing spaces on save.
@@ -251,22 +768,62 @@ public:
      * triState = 1: remove trailing spaces of modified lines (line modification system)
      * triState = 2: remove trailing spaces in entire document
      */
-    void setRemoveSpaces(int triState);
-    int removeSpaces() const;
+    void setRemoveSpaces(int triState)
+    {
+        setValue(RemoveSpacesMode, triState);
+    }
 
-    void setNewLineAtEof(bool on);
-    bool newLineAtEof() const;
+    int removeSpaces() const
+    {
+        return value(RemoveSpacesMode).toInt();
+    }
 
-    void setOvr(bool on);
-    bool ovr() const;
+    void setNewLineAtEof(bool on)
+    {
+        setValue(NewlineAtEOF, on);
+    }
 
-    void setTabIndents(bool on);
-    bool tabIndentsEnabled() const;
+    bool newLineAtEof() const
+    {
+        return value(NewlineAtEOF).toBool();
+    }
 
+    void setOvr(bool on)
+    {
+        setValue(OverwriteMode, on);
+    }
+
+    bool ovr() const
+    {
+        return value(OverwriteMode).toBool();
+    }
+
+    void setTabIndents(bool on)
+    {
+        setValue(IndentOnTab, on);
+    }
+
+    bool tabIndentsEnabled() const
+    {
+        return value(IndentOnTab).toBool();
+    }
+
+    /**
+     * Get current text codec.
+     * Based on current set encoding
+     * @return current text codec.
+     */
     QTextCodec *codec() const;
-    const QString &encoding() const;
-    bool setEncoding(const QString &encoding);
-    bool isSetEncoding() const;
+
+    QString encoding() const
+    {
+        return value(Encoding).toString();
+    }
+
+    bool setEncoding(const QString &encoding)
+    {
+        return setValue(Encoding, encoding);
+    }
 
     enum Eol {
         eolUnix = 0,
@@ -274,33 +831,52 @@ public:
         eolMac = 2
     };
 
-    int eol() const;
+    int eol() const
+    {
+        return value(EndOfLine).toInt();
+    }
+
+    /**
+     * Get current end of line string.
+     * Based on current set eol mode.
+     * @return current end of line string
+     */
     QString eolString();
 
-    void setEol(int mode);
+    void setEol(int mode)
+    {
+        setValue(EndOfLine, mode);
+    }
 
-    bool bom() const;
-    void setBom(bool bom);
+    bool bom() const
+    {
+        return value(ByteOrderMark).toBool();
+    }
 
-    bool allowEolDetection() const;
-    void setAllowEolDetection(bool on);
+    void setBom(bool bom)
+    {
+        setValue(ByteOrderMark, bom);
+    }
 
-    enum BackupFlags {
-        LocalFiles = 1,
-        RemoteFiles = 2
-    };
+    bool allowEolDetection() const
+    {
+        return value(AllowEndOfLineDetection).toBool();
+    }
 
-    uint backupFlags() const;
-    void setBackupFlags(uint flags);
+    void setAllowEolDetection(bool on)
+    {
+        setValue(AllowEndOfLineDetection, on);
+    }
 
-    const QString &backupPrefix() const;
-    void setBackupPrefix(const QString &prefix);
+    QString swapDirectory() const
+    {
+        return value(SwapFileDirectory).toString();
+    }
 
-    const QString &backupSuffix() const;
-    void setBackupSuffix(const QString &suffix);
-
-    const QString &swapDirectory() const;
-    void setSwapDirectory(const QString &directory);
+    void setSwapDirectory(const QString &directory)
+    {
+        setValue(SwapFileDirectory, directory);
+    }
 
     enum SwapFileMode {
         DisableSwapFile = 0,
@@ -308,84 +884,35 @@ public:
         SwapFilePresetDirectory
     };
 
-    uint swapFileModeRaw() const;
-    SwapFileMode swapFileMode() const;
-    void setSwapFileMode(uint mode);
+    SwapFileMode swapFileMode() const
+    {
+        return SwapFileMode(value(SwapFile).toInt());
+    }
 
-    uint swapSyncInterval() const;
-    void setSwapSyncInterval(uint interval);
+    void setSwapFileMode(int mode)
+    {
+        setValue(SwapFile, mode);
+    }
 
-    bool onTheFlySpellCheck() const;
-    void setOnTheFlySpellCheck(bool on);
+    int swapSyncInterval() const
+    {
+        return value(SwapFileSyncInterval).toInt();
+    }
 
-    int lineLengthLimit() const;
-    void setLineLengthLimit(int limit);
+    void setSwapSyncInterval(int interval)
+    {
+        setValue(SwapFileSyncInterval, interval);
+    }
 
-private:
-    QString m_indentationMode;
-    int m_indentationWidth = 2;
-    int m_tabWidth = 4;
-    uint m_tabHandling = tabSmart;
-    uint m_configFlags = 0;
-    int m_wordWrapAt = 80;
-    bool m_wordWrap;
-    bool m_pageUpDownMovesCursor;
-    bool m_allowEolDetection;
-    int m_eol;
-    bool m_bom;
-    uint m_backupFlags;
-    QString m_encoding;
-    QString m_backupPrefix;
-    QString m_backupSuffix;
-    uint m_swapFileMode;
-    QString m_swapDirectory;
-    uint m_swapSyncInterval;
-    bool m_onTheFlySpellCheck;
-    int m_lineLengthLimit;
+    int lineLengthLimit() const
+    {
+        return value(LineLengthLimit).toInt();
+    }
 
-    bool m_tabWidthSet : 1;
-    bool m_indentationWidthSet : 1;
-    bool m_indentationModeSet : 1;
-    bool m_wordWrapSet : 1;
-    bool m_wordWrapAtSet : 1;
-    bool m_pageUpDownMovesCursorSet : 1;
-
-    bool m_keepExtraSpacesSet : 1;
-    bool m_keepExtraSpaces : 1;
-    bool m_indentPastedTextSet : 1;
-    bool m_indentPastedText : 1;
-    bool m_backspaceIndentsSet : 1;
-    bool m_backspaceIndents : 1;
-    bool m_smartHomeSet : 1;
-    bool m_smartHome : 1;
-    bool m_showTabsSet : 1;
-    bool m_showTabs : 1;
-    bool m_showSpacesSet : 1;
-    bool m_showSpaces : 1;
-    uint m_markerSize = 1;
-    bool m_replaceTabsDynSet : 1;
-    bool m_replaceTabsDyn : 1;
-    bool m_removeSpacesSet : 1;
-    uint m_removeSpaces : 2;
-    bool m_newLineAtEofSet : 1;
-    bool m_newLineAtEof : 1;
-    bool m_overwiteModeSet : 1;
-    bool m_overwiteMode : 1;
-    bool m_tabIndentsSet : 1;
-    bool m_tabIndents : 1;
-
-    bool m_encodingSet : 1;
-    bool m_eolSet : 1;
-    bool m_bomSet : 1;
-    bool m_allowEolDetectionSet : 1;
-    bool m_backupFlagsSet : 1;
-    bool m_backupPrefixSet : 1;
-    bool m_backupSuffixSet : 1;
-    bool m_swapFileModeSet : 1;
-    bool m_swapDirectorySet : 1;
-    bool m_swapSyncIntervalSet : 1;
-    bool m_onTheFlySpellCheckSet : 1;
-    bool m_lineLengthLimitSet : 1;
+    void setLineLengthLimit(int limit)
+    {
+        setValue(LineLengthLimit, limit);
+    }
 
 private:
     static KateDocumentConfig *s_global;
@@ -418,11 +945,6 @@ public:
         return s_global;
     }
 
-    inline bool isGlobal() const
-    {
-        return (this == global());
-    }
-
 public:
     /**
      * Read config from object
@@ -444,6 +966,9 @@ public:
     }
     bool dynWordWrap() const;
     void setDynWordWrap(bool wrap);
+
+    bool dynWrapAtStaticMarker() const;
+    void setDynWrapAtStaticMarker(bool on);
 
     int dynWordWrapIndicators() const;
     void setDynWordWrapIndicators(int mode);
@@ -566,6 +1091,9 @@ public:
     bool smartCopyCut() const;
     void setSmartCopyCut(bool on);
 
+    bool mousePasteAtCursorPosition() const;
+    void setMousePasteAtCursorPosition(bool on);
+
     bool scrollPastEnd() const;
     void setScrollPastEnd(bool on);
 
@@ -575,8 +1103,8 @@ public:
     bool showWordCount() const;
     void setShowWordCount(bool on);
 
-    bool showLinesCount() const;
-    void setShowLinesCount(bool on);
+    bool showLineCount() const;
+    void setShowLineCount(bool on);
 
     bool autoBrackets() const;
     void setAutoBrackets(bool on);
@@ -586,6 +1114,7 @@ public:
 
 private:
     bool m_dynWordWrap;
+    bool m_dynWrapAtStaticMarker;
     int m_dynWordWrapIndicators;
     int m_dynWordWrapAlignIndent;
     bool m_lineNumbers;
@@ -615,14 +1144,16 @@ private:
     int m_wordCompletionMinimalWordLength;
     bool m_wordCompletionRemoveTail;
     bool m_smartCopyCut;
+    bool m_mousePasteAtCursorPosition = false;
     bool m_scrollPastEnd;
     bool m_foldFirstLine;
     bool m_showWordCount = false;
-    bool m_showLinesCount = false;
+    bool m_showLineCount = false;
     bool m_autoBrackets;
     bool m_backspaceRemoveComposed;
 
     bool m_dynWordWrapSet : 1;
+    bool m_dynWrapAtStaticMarkerSet : 1;
     bool m_dynWordWrapIndicatorsSet : 1;
     bool m_dynWordWrapAlignIndentSet : 1;
     bool m_lineNumbersSet : 1;
@@ -650,12 +1181,13 @@ private:
     bool m_keywordCompletionSet : 1;
     bool m_wordCompletionMinimalWordLengthSet : 1;
     bool m_smartCopyCutSet : 1;
+    bool m_mousePasteAtCursorPositionSet : 1;
     bool m_scrollPastEndSet : 1;
     bool m_allowMarkMenu : 1;
     bool m_wordCompletionRemoveTailSet : 1;
     bool m_foldFirstLineSet : 1;
     bool m_showWordCountSet : 1;
-    bool m_showLinesCountSet : 1;
+    bool m_showLineCountSet : 1;
     bool m_autoBracketsSet : 1;
     bool m_backspaceRemoveComposedSet : 1;
 
@@ -678,7 +1210,7 @@ public:
     /**
      * Construct a DocumentConfig
      */
-    KateRendererConfig(KateRenderer *renderer);
+    explicit KateRendererConfig(KateRenderer *renderer);
 
     /**
      * Cu DocumentConfig
@@ -688,11 +1220,6 @@ public:
     inline static KateRendererConfig *global()
     {
         return s_global;
-    }
-
-    inline bool isGlobal() const
-    {
-        return (this == global());
     }
 
 public:

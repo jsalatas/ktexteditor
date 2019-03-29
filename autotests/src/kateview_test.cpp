@@ -31,6 +31,8 @@
 #include <QtTestWidgets>
 #include <QTemporaryFile>
 
+#define testNewRow() (QTest::newRow(QString("line %1").arg(__LINE__).toLatin1().data()))
+
 using namespace KTextEditor;
 
 QTEST_MAIN(KateViewTest)
@@ -267,6 +269,65 @@ void KateViewTest::testSelection()
     QCOMPARE(view->selectionRange(), Range(1, 1, 2, 1));
 }
 
+void KateViewTest::testDeselectByArrowKeys_data()
+{
+    QTest::addColumn<QString>("text");
+
+    testNewRow() << "foobarhaz";
+    testNewRow() << "كلسشمن يتبكسب"; // We all win, translates Google
+}
+
+void KateViewTest::testDeselectByArrowKeys()
+{
+    QFETCH(QString, text);
+
+    KTextEditor::DocumentPrivate doc;
+    doc.setText(text);
+    KTextEditor::ViewPrivate *view = new KTextEditor::ViewPrivate(&doc, nullptr);
+    KTextEditor::Cursor cur1(0, 3); // Start of bar: foo|barhaz
+    KTextEditor::Cursor cur2(0, 6); //   End of bar: foobar|haz
+    KTextEditor::Cursor curDelta(0, 1);
+    Range range(cur1, cur2); // Select "bar"
+
+    // RTL drives me nuts!
+    KTextEditor::Cursor help;
+    if (text.isRightToLeft()) {
+        help = cur1;
+        cur1 = cur2;
+        cur2 = help;
+    }
+
+    view->setSelection(range);
+    view->setCursorPositionInternal(cur1);
+    view->cursorLeft();
+    QCOMPARE(view->cursorPosition(), cur1); // Be at begin: foo|barhaz
+    QCOMPARE(view->selection(), false);
+
+    view->setSelection(range);
+    view->setCursorPositionInternal(cur1);
+    view->cursorRight();
+    QCOMPARE(view->cursorPosition(), cur2);  // Be at end: foobar|haz
+    QCOMPARE(view->selection(), false);
+
+    view->config()->setPersistentSelection(true);
+
+    view->setSelection(range);
+    view->setCursorPositionInternal(cur1);
+    view->cursorLeft();
+    // RTL drives me nuts!
+    help = text.isRightToLeft() ? (cur1 + curDelta): (cur1 - curDelta);
+    QCOMPARE(view->cursorPosition(), help); // Be one left: fo|obarhaz
+    QCOMPARE(view->selection(), true);
+
+    view->setSelection(range);
+    view->setCursorPositionInternal(cur1);
+    view->cursorRight();
+    // RTL drives me nuts!
+    help = text.isRightToLeft() ? (cur1 - curDelta): (cur1 + curDelta);
+    QCOMPARE(view->cursorPosition(), help); // Be one right: foob|arhaz
+    QCOMPARE(view->selection(), true);
+}
+
 void KateViewTest::testKillline()
 {
     KTextEditor::DocumentPrivate doc;
@@ -428,6 +489,43 @@ void KateViewTest::testDragAndDrop()
 
     QCOMPARE(view->cursorPosition(), KTextEditor::Cursor(3, 0));
     QCOMPARE(view->selectionRange(), Range(2, 0, 3, 0));
+}
+
+// test for bug https://bugs.kde.org/402594
+void KateViewTest::testGotoMatchingBracket()
+{
+    KTextEditor::DocumentPrivate doc(false, false);
+    doc.setText("foo(bar)baz");
+    //           0123456789
+
+    KTextEditor::ViewPrivate *view = new KTextEditor::ViewPrivate(&doc, nullptr);
+    const KTextEditor::Cursor cursor1(0, 3); // Starting point on open (
+    const KTextEditor::Cursor cursor2(0, 8); // Insert Mode differ slightly from...
+    const KTextEditor::Cursor cursor3(0, 7); // Overwrite Mode
+
+    doc.config()->setOvr(false); // Insert Mode
+
+    view->setCursorPosition(cursor1);
+    view->toMatchingBracket();
+    QCOMPARE(view->cursorPosition(), cursor2);
+    view->toMatchingBracket();
+    QCOMPARE(view->cursorPosition(), cursor1);
+
+    // Currently has it in Insert Mode also to work when the cursor is placed inside the parentheses
+    view->setCursorPosition(cursor1 + KTextEditor::Cursor(0, 1));
+    view->toMatchingBracket();
+    QCOMPARE(view->cursorPosition(), cursor2);
+    view->setCursorPosition(cursor2 + KTextEditor::Cursor(0, -1));
+    view->toMatchingBracket();
+    QCOMPARE(view->cursorPosition(), cursor1);
+
+    doc.config()->setOvr(true);// Overwrite Mode
+
+    view->setCursorPosition(cursor1);
+    view->toMatchingBracket();
+    QCOMPARE(view->cursorPosition(), cursor3);
+    view->toMatchingBracket();
+    QCOMPARE(view->cursorPosition(), cursor1);
 }
 
 // kate: indent-mode cstyle; indent-width 4; replace-tabs on;

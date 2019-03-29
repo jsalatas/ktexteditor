@@ -56,6 +56,7 @@ void KateSpellCheckManager::ignoreWord(const QString &word, const QString &dicti
     Sonnet::Speller speller;
     speller.setLanguage(dictionary);
     speller.addToSession(word);
+    emit wordIgnored(word);
 }
 
 void KateSpellCheckManager::addToDictionary(const QString &word, const QString &dictionary)
@@ -63,6 +64,7 @@ void KateSpellCheckManager::addToDictionary(const QString &word, const QString &
     Sonnet::Speller speller;
     speller.setLanguage(dictionary);
     speller.addToPersonal(word);
+    emit wordAddedToDictionary(word);
 }
 
 QList<KTextEditor::Range> KateSpellCheckManager::rangeDifference(const KTextEditor::Range &r1,
@@ -123,7 +125,7 @@ QList<QPair<KTextEditor::Range, QString> > KateSpellCheckManager::spellCheckLang
         }
     }
     // finally, we still have to sort the list
-    qStableSort(toReturn.begin(), toReturn.end(), lessThanRangeDictionaryPair);
+    std::stable_sort(toReturn.begin(), toReturn.end(), lessThanRangeDictionaryPair);
     return toReturn;
 }
 
@@ -237,12 +239,8 @@ QList<QPair<KTextEditor::Range, QString> > KateSpellCheckManager::spellCheckRang
 void KateSpellCheckManager::replaceCharactersEncodedIfNecessary(const QString &newWord, KTextEditor::DocumentPrivate *doc,
         const KTextEditor::Range &replacementRange)
 {
-    const QString replacedString = doc->text(replacementRange);
-    int attr = doc->kateTextLine(replacementRange.start().line())->attribute(replacementRange.start().column());
-    int p = doc->highlight()->getEncodedCharactersInsertionPolicy(attr);
-
-    if ((p == KTextEditor::DocumentPrivate::EncodeAlways)
-            || (p == KTextEditor::DocumentPrivate::EncodeWhenPresent && doc->containsCharacterEncoding(replacementRange))) {
+    const int attr = doc->kateTextLine(replacementRange.start().line())->attribute(replacementRange.start().column());
+    if (!doc->highlight()->getCharacterEncodings(attr).isEmpty() && doc->containsCharacterEncoding(replacementRange)) {
         doc->replaceText(replacementRange, newWord);
         doc->replaceCharactersByEncoding(KTextEditor::Range(replacementRange.start(),
                                          replacementRange.start() + KTextEditor::Cursor(0, newWord.length())));

@@ -48,7 +48,7 @@ public:
      * Constructor
      * @param document the document the undo item belongs to
      */
-    KateUndo(KTextEditor::DocumentPrivate *document);
+    explicit KateUndo(KTextEditor::DocumentPrivate *document);
 
     /**
      * Destructor
@@ -81,6 +81,7 @@ public:
     /**
      * merge an undo item
      * Saves a bit of memory and potentially many calls when undo/redoing.
+     * Only called for equal types of this object and the passed one.
      * @param undo undo item to merge
      * @return success
      */
@@ -158,13 +159,13 @@ public:
     }
 
 private:
-    uchar m_lineModFlags;
+    uchar m_lineModFlags = 0x0;
 };
 
 class KateEditInsertTextUndo : public KateUndo
 {
 public:
-    KateEditInsertTextUndo(KTextEditor::DocumentPrivate *document, int line, int col, const QString &text);
+    explicit KateEditInsertTextUndo(KTextEditor::DocumentPrivate *document, int line, int col, const QString &text);
 
     /**
      * @copydoc KateUndo::isEmpty()
@@ -213,7 +214,7 @@ private:
 class KateEditRemoveTextUndo : public KateUndo
 {
 public:
-    KateEditRemoveTextUndo(KTextEditor::DocumentPrivate *document, int line, int col, const QString &text);
+    explicit KateEditRemoveTextUndo(KTextEditor::DocumentPrivate *document, int line, int col, const QString &text);
 
     /**
      * @copydoc KateUndo::isEmpty()
@@ -262,7 +263,7 @@ private:
 class KateEditMarkLineAutoWrappedUndo : public KateUndo
 {
 public:
-    KateEditMarkLineAutoWrappedUndo(KTextEditor::DocumentPrivate *document, int line, bool autowrapped)
+    explicit KateEditMarkLineAutoWrappedUndo(KTextEditor::DocumentPrivate *document, int line, bool autowrapped)
         : KateUndo(document)
         , m_line(line)
         , m_autowrapped(autowrapped)
@@ -294,7 +295,7 @@ private:
 class KateEditWrapLineUndo : public KateUndo
 {
 public:
-    KateEditWrapLineUndo(KTextEditor::DocumentPrivate *document, int line, int col, int len, bool newLine);
+    explicit KateEditWrapLineUndo(KTextEditor::DocumentPrivate *document, int line, int col, int len, bool newLine);
 
     /**
      * @copydoc KateUndo::undo()
@@ -330,7 +331,7 @@ private:
 class KateEditUnWrapLineUndo : public KateUndo
 {
 public:
-    KateEditUnWrapLineUndo(KTextEditor::DocumentPrivate *document, int line, int col, int len, bool removeLine);
+    explicit KateEditUnWrapLineUndo(KTextEditor::DocumentPrivate *document, int line, int col, int len, bool removeLine);
 
     /**
      * @copydoc KateUndo::undo()
@@ -366,7 +367,7 @@ private:
 class KateEditInsertLineUndo : public KateUndo
 {
 public:
-    KateEditInsertLineUndo(KTextEditor::DocumentPrivate *document, int line, const QString &text);
+    explicit KateEditInsertLineUndo(KTextEditor::DocumentPrivate *document, int line, const QString &text);
 
     /**
      * @copydoc KateUndo::undo()
@@ -400,7 +401,7 @@ private:
 class KateEditRemoveLineUndo : public KateUndo
 {
 public:
-    KateEditRemoveLineUndo(KTextEditor::DocumentPrivate *document, int line, const QString &text);
+    explicit KateEditRemoveLineUndo(KTextEditor::DocumentPrivate *document, int line, const QString &text);
 
     /**
      * @copydoc KateUndo::undo()
@@ -448,6 +449,9 @@ public:
      * Destructor
      */
     ~KateUndoGroup();
+
+    KateUndoGroup(const KateUndoGroup &) = delete;
+    KateUndoGroup& operator=(const KateUndoGroup &) = delete;
 
 public:
     /**
@@ -546,7 +550,7 @@ private:
     /**
      * prohibit merging with the next group
      */
-    bool m_safePoint;
+    bool m_safePoint = false;
 
     /**
      * the text selection of the active view before the edit step

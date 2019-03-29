@@ -32,16 +32,23 @@
 #include "plugin.h"
 
 #include "command.h"
+#include "inlinenoteinterface.h"
+#include "inlinenote.h"
+#include "inlinenotedata.h"
+#include "inlinenoteprovider.h"
 #include "markinterface.h"
 #include "modificationinterface.h"
 #include "sessionconfiginterface.h"
 #include "texthintinterface.h"
+#include "variable.h"
 
 #include "annotationinterface.h"
+#include "abstractannotationitemdelegate.h"
 
 #include "kateglobal.h"
 #include "kateconfig.h"
 #include "katecmd.h"
+#include "katemacroexpander.h"
 
 using namespace KTextEditor;
 
@@ -98,6 +105,80 @@ QString Editor::defaultEncoding () const
     return d->documentConfig()->encoding ();
 }
 
+bool Editor::registerVariableMatch(const QString& name, const QString& description, ExpandFunction expansionFunc)
+{
+    if (name.isEmpty() || expansionFunc == nullptr)
+        return false;
+
+    if (d->m_variableExactMatches.contains(name))
+        return false;
+
+    d->m_variableExactMatches.insert(name, Variable(name, description, expansionFunc));
+    return true;
+}
+
+bool Editor::registerVariablePrefix(const QString& prefix, const QString& description, ExpandFunction expansionFunc)
+{
+    if (prefix.isEmpty() || expansionFunc == nullptr)
+        return false;
+
+    if (d->m_variablePrefixMatches.contains(prefix))
+        return false;
+
+    if (!prefix.contains(QLatin1Char(':')))
+        return false;
+
+    d->m_variablePrefixMatches.insert(prefix, Variable(prefix, description, expansionFunc));
+    return true;
+}
+
+bool Editor::unregisterVariableMatch(const QString& variable)
+{
+    auto it = d->m_variableExactMatches.find(variable);
+    if (it != d->m_variableExactMatches.end()) {
+        d->m_variableExactMatches.erase(it);
+        return true;
+    }
+    return false;
+}
+
+bool Editor::unregisterVariablePrefix(const QString& variable)
+{
+    auto it = d->m_variablePrefixMatches.find(variable);
+    if (it != d->m_variablePrefixMatches.end()) {
+        d->m_variablePrefixMatches.erase(it);
+        return true;
+    }
+    return false;
+}
+
+bool Editor::expandVariable(const QString& variable, KTextEditor::View* view, QString& output) const
+{
+    // first try exact matches
+    const auto it = d->m_variableExactMatches.find(variable);
+    if (it != d->m_variableExactMatches.end()) {
+        output = it->evaluate(variable, view);
+        return true;
+    }
+
+    // try prefix matching
+    const int colonIndex = variable.indexOf(QLatin1Char(':'));
+    if (colonIndex >= 0) {
+        const QString prefix = variable.left(colonIndex + 1);
+        const auto itPrefix = d->m_variablePrefixMatches.find(prefix);
+        if (itPrefix != d->m_variablePrefixMatches.end()) {
+            output = itPrefix->evaluate(variable, view);
+            return true;
+        }
+    }
+    return false;
+}
+
+void Editor::expandText(const QString& text, KTextEditor::View* view, QString& output) const
+{
+    output = KateMacroExpander::expandMacro(text, view);
+}
+
 bool View::insertText(const QString &text)
 {
     KTextEditor::Document *doc = document();
@@ -136,6 +217,11 @@ bool View::insertTemplate(const KTextEditor::Cursor& insertPosition,
     return d->insertTemplateInternal(insertPosition, templateString, script);
 }
 
+void View::setViewInputMode(InputMode inputMode)
+{
+    d->setInputMode(inputMode);
+}
+
 ConfigPage::ConfigPage(QWidget *parent)
     : QWidget(parent)
     , d(nullptr)
@@ -168,7 +254,7 @@ Plugin::Plugin(QObject *parent)
 {}
 
 Plugin::~Plugin()
-{}    
+{}
 
 int Plugin::configPages() const
 {
@@ -209,6 +295,103 @@ TextHintProvider::TextHintProvider()
 
 TextHintProvider::~TextHintProvider()
 {}
+
+InlineNoteInterface::InlineNoteInterface()
+{}
+
+InlineNoteInterface::~InlineNoteInterface()
+{}
+
+InlineNoteProvider::InlineNoteProvider()
+{}
+
+InlineNoteProvider::~InlineNoteProvider()
+{}
+
+KateInlineNoteData::KateInlineNoteData(KTextEditor::InlineNoteProvider* provider,
+                                       const KTextEditor::View* view,
+                                       const KTextEditor::Cursor& position,
+                                       int index,
+                                       bool underMouse,
+                                       const QFont& font,
+                                       int lineHeight)
+    : m_provider(provider)
+    , m_view(view)
+    , m_position(position)
+    , m_index(index)
+    , m_underMouse(underMouse)
+    , m_font(font)
+    , m_lineHeight(lineHeight)
+{}
+
+InlineNote::InlineNote(const KateInlineNoteData& data)
+    : d(data)
+{
+}
+
+qreal InlineNote::width() const
+{
+    return d.m_provider->inlineNoteSize(*this).width();
+}
+
+bool KTextEditor::InlineNote::underMouse() const
+{
+    return d.m_underMouse;
+}
+
+void KTextEditor::InlineNoteProvider::inlineNoteActivated(const InlineNote& note, Qt::MouseButtons buttons, const QPoint& globalPos)
+{
+    Q_UNUSED(note);
+    Q_UNUSED(buttons);
+    Q_UNUSED(globalPos);
+}
+
+void KTextEditor::InlineNoteProvider::inlineNoteFocusInEvent(const KTextEditor::InlineNote& note, const QPoint& globalPos)
+{
+    Q_UNUSED(note);
+    Q_UNUSED(globalPos);
+}
+
+void KTextEditor::InlineNoteProvider::inlineNoteFocusOutEvent(const KTextEditor::InlineNote& note)
+{
+    Q_UNUSED(note);
+}
+
+void KTextEditor::InlineNoteProvider::inlineNoteMouseMoveEvent(const KTextEditor::InlineNote& note, const QPoint& globalPos)
+{
+    Q_UNUSED(note);
+    Q_UNUSED(globalPos);
+}
+
+KTextEditor::InlineNoteProvider* InlineNote::provider() const
+{
+    return d.m_provider;
+}
+
+const KTextEditor::View* InlineNote::view() const
+{
+    return d.m_view;
+}
+
+QFont InlineNote::font() const
+{
+    return d.m_font;
+}
+
+int InlineNote::index() const
+{
+    return d.m_index;
+}
+
+int InlineNote::lineHeight() const
+{
+    return d.m_lineHeight;
+}
+
+KTextEditor::Cursor InlineNote::position() const
+{
+    return d.m_position;
+}
 
 Command::Command(const QStringList &cmds, QObject *parent)
     : QObject(parent)
@@ -274,3 +457,25 @@ QRect View::textAreaRect() const
 {
     return d->textAreaRectInternal();
 }
+
+StyleOptionAnnotationItem::StyleOptionAnnotationItem()
+    : contentFontMetrics(QFont())
+{}
+
+StyleOptionAnnotationItem::StyleOptionAnnotationItem(const StyleOptionAnnotationItem &other)
+    : QStyleOption(Version, Type)
+    , contentFontMetrics(QFont())
+{
+    *this = other;
+}
+
+StyleOptionAnnotationItem::StyleOptionAnnotationItem(int version)
+    : QStyleOption(version, Type)
+    , contentFontMetrics(QFont())
+{}
+
+AbstractAnnotationItemDelegate::AbstractAnnotationItemDelegate(QObject *parent)
+    : QObject(parent)
+{}
+
+AbstractAnnotationItemDelegate::~AbstractAnnotationItemDelegate() = default;

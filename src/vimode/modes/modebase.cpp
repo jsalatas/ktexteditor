@@ -585,7 +585,7 @@ Range ModeBase::findSurroundingQuotes(const QChar &c, bool inner) const
 
     QString line = doc()->line(cursor.line());
 
-    // If cursor on the quote we should shoose the best direction.
+    // If cursor on the quote we should choose the best direction.
     if (line.at(cursor.column()) == c) {
 
         int attribute = m_view->doc()->kateTextLine(cursor.line())->attribute(cursor.column());
@@ -1342,6 +1342,10 @@ void ModeBase::goToPos(const Range &r)
     KTextEditor::Cursor c;
     c.setLine(r.endLine);
     c.setColumn(r.endColumn);
+
+    if (!c.isValid()) {
+        return;
+    }
 
     if (r.jump) {
         m_viInputModeManager->jumps()->add(m_view->cursorPosition());

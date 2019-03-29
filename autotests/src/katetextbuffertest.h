@@ -1,7 +1,7 @@
 /*  This file is part of the Kate project.
  *
  *  Copyright (C) 2010 Christoph Cullmann <cullmann@kde.org>
- *  Copyright (C) 2010 Dominik Haumann <dhaumann kde org>
+ *  Copyright (C) 2010-2018 Dominik Haumann <dhaumann@kde.org>
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
  *  License as published by the Free Software Foundation; either
@@ -18,8 +18,8 @@
  *  Boston, MA 02110-1301, USA.
  */
 
-#ifndef KATEBUFFERTEST_H
-#define KATEBUFFERTEST_H
+#ifndef KATETEXTBUFFERTEST_H
+#define KATETEXTBUFFERTEST_H
 
 #include <QtTest>
 #include <QObject>
@@ -43,4 +43,4 @@ private Q_SLOTS:
     void saveFileWithElevatedPrivileges();
 };
 
-#endif // KATEBUFFERTEST_H
+#endif // KATETEXTBUFFERTEST_H

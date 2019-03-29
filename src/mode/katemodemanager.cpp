@@ -27,7 +27,6 @@
 #include "kateview.h"
 #include "kateglobal.h"
 #include "katesyntaxmanager.h"
-#include "katesyntaxdocument.h"
 #include "katepartdebug.h"
 
 #include <KConfigGroup>
@@ -101,6 +100,12 @@ void KateModeManager::update()
     // try if the hl stuff is up to date...
     const auto modes = KateHlManager::self()->modeList();
     for (int i = 0; i < modes.size(); ++i) {
+        // filter out hidden languages; and
+        // filter out "None" hl, we add that later as "normal" mode
+        if (modes[i].isHidden() || modes[i].name() == QLatin1String("None")) {
+            continue;
+        }
+
         KateFileType *type = nullptr;
         bool newType = false;
         if (m_name2Type.contains(modes[i].name())) {
@@ -131,7 +136,7 @@ void KateModeManager::update()
     }
 
     // sort the list...
-    qSort(m_types.begin(), m_types.end(), compareKateFileType);
+    std::sort(m_types.begin(), m_types.end(), compareKateFileType);
 
     // add the none type...
     KateFileType *t = new KateFileType();

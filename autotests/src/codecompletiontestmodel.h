@@ -17,8 +17,8 @@
    Boston, MA 02110-1301, USA.
 */
 
-#ifndef CODECOMPLETIONTEST_H
-#define CODECOMPLETIONTEST_H
+#ifndef CODECOMPLETIONTEST_MODEL_H
+#define CODECOMPLETIONTEST_MODEL_H
 
 #include <ktexteditor/codecompletionmodel.h>
 #include <QStringList>
@@ -34,7 +34,7 @@ class CodeCompletionTestModel : public KTextEditor::CodeCompletionModel
     Q_OBJECT
 
 public:
-    CodeCompletionTestModel(KTextEditor::View *parent = nullptr, const QString &startText = QString());
+    explicit CodeCompletionTestModel(KTextEditor::View *parent = nullptr, const QString &startText = QString());
 
     KTextEditor::View *view() const;
     KTextEditor::CodeCompletionInterface *cc() const;
@@ -52,7 +52,7 @@ class AbbreviationCodeCompletionTestModel : public CodeCompletionTestModel
     Q_OBJECT
 
 public:
-    AbbreviationCodeCompletionTestModel(KTextEditor::View *parent = nullptr, const QString &startText = QString());
+    explicit AbbreviationCodeCompletionTestModel(KTextEditor::View *parent = nullptr, const QString &startText = QString());
 
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
 

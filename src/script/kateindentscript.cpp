@@ -1,6 +1,6 @@
 // This file is part of the KDE libraries
 // Copyright (C) 2008 Paul Giannaros <paul@giannaros.org>
-// Copyright (C) 2009 Dominik Haumann <dhaumann kde org>
+// Copyright (C) 2009-2018 Dominik Haumann <dhaumann@kde.org>
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Library General Public
@@ -27,7 +27,6 @@
 
 KateIndentScript::KateIndentScript(const QString &url, const KateIndentScriptHeader &header)
     : KateScript(url)
-    , m_triggerCharactersSet(false)
     , m_indentHeader(header)
 {
 }

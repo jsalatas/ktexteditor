@@ -1,6 +1,6 @@
 // This file is part of the KDE libraries
 // Copyright (C) 2008 Paul Giannaros <paul@giannaros.org>
-// Copyright (C) 2009 Dominik Haumann <dhaumann kde org>
+// Copyright (C) 2009-2018 Dominik Haumann <dhaumann@kde.org>
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Library General Public
@@ -791,10 +791,7 @@ bool KateScriptDocument::isAttribute(const QJSValue &jscursor, int attr)
 
 QString KateScriptDocument::attributeName(int line, int column)
 {
-    // just use the global default schema, we anyway only want the style number!
-    QList<KTextEditor::Attribute::Ptr> attributes = m_document->highlight()->attributes(KateRendererConfig::global()->schema());
-    KTextEditor::Attribute::Ptr a = attributes[document()->plainKateTextLine(line)->attribute(column)];
-    return a->name();
+    return m_document->highlight()->nameForAttrib(document()->plainKateTextLine(line)->attribute(column));
 }
 
 QString KateScriptDocument::attributeName(const QJSValue &jscursor)
@@ -827,6 +824,7 @@ void KateScriptDocument::setVariable(const QString &s, const QString &v)
 bool KateScriptDocument::_isCode(int defaultStyle)
 {
     return (defaultStyle != KTextEditor::dsComment
+            && defaultStyle != KTextEditor::dsAlert
             && defaultStyle != KTextEditor::dsString
             && defaultStyle != KTextEditor::dsRegionMarker
             && defaultStyle != KTextEditor::dsChar

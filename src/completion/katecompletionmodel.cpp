@@ -370,9 +370,17 @@ KTextEditor::ViewPrivate *KateCompletionModel::view() const
     return widget()->view();
 }
 
-void KateCompletionModel::setMatchCaseSensitivity(Qt::CaseSensitivity cs)
+void KateCompletionModel::setMatchCaseSensitivity(Qt::CaseSensitivity match_cs)
 {
-    m_matchCaseSensitivity = cs;
+    m_matchCaseSensitivity = match_cs;
+    Q_ASSERT(m_exactMatchCaseSensitivity == m_matchCaseSensitivity || m_matchCaseSensitivity == Qt::CaseInsensitive);
+}
+
+void KateCompletionModel::setMatchCaseSensitivity(Qt::CaseSensitivity match_cs, Qt::CaseSensitivity exact_match_cs)
+{
+    m_matchCaseSensitivity = match_cs;
+    m_exactMatchCaseSensitivity = exact_match_cs;
+    Q_ASSERT(m_exactMatchCaseSensitivity == m_matchCaseSensitivity || m_matchCaseSensitivity == Qt::CaseInsensitive);
 }
 
 int KateCompletionModel::columnCount(const QModelIndex &) const
@@ -432,7 +440,7 @@ QModelIndex KateCompletionModel::index(int row, int column, const QModelIndex &p
         }
 
         if (row >= g->filtered.count()) {
-            //qCWarning(LOG_KTE) << "Invalid index requested: row " << row << " beyond indivdual range in group " << g;
+            //qCWarning(LOG_KTE) << "Invalid index requested: row " << row << " beyond individual range in group " << g;
             return QModelIndex();
         }
 
@@ -1562,6 +1570,19 @@ bool KateCompletionModel::Item::operator <(const Item &rhs) const
         return false;
     }
 
+    if (ret == 0) {
+        const QString& filter = rhs.model->currentCompletion(rhs.m_sourceRow.first);
+        bool thisStartWithFilter = m_nameColumn.startsWith(filter, Qt::CaseSensitive);
+        bool rhsStartsWithFilter = rhs.m_nameColumn.startsWith(filter, Qt::CaseSensitive);
+        
+        if( thisStartWithFilter && !rhsStartsWithFilter ) {
+            return true;
+        }
+        if( rhsStartsWithFilter && !thisStartWithFilter ) {
+            return false;
+        }
+    }
+
     if (model->isSortingByInheritanceDepth()) {
         ret = inheritanceDepth - rhs.inheritanceDepth;
     }
@@ -1572,14 +1593,6 @@ bool KateCompletionModel::Item::operator <(const Item &rhs) const
     }
 
     if (ret == 0) {
-        const QString& filter = rhs.model->currentCompletion(rhs.m_sourceRow.first);
-        if( m_nameColumn.startsWith(filter, Qt::CaseSensitive) ) {
-            return true;
-        }
-        if( rhs.m_nameColumn.startsWith(filter, Qt::CaseSensitive) ) {
-            return false;
-        }
-
         // FIXME need to define a better default ordering for multiple model display
         ret = m_sourceRow.second.row() - rhs.m_sourceRow.second.row();
     }
@@ -1600,9 +1613,9 @@ void KateCompletionModel::Group::addItem(Item i, bool notifyModel)
 
     if (model->isSortingEnabled()) {
 
-        prefilter.insert(qUpperBound(prefilter.begin(), prefilter.end(), i), i);
+        prefilter.insert(std::upper_bound(prefilter.begin(), prefilter.end(), i), i);
         if (i.isVisible()) {
-            QList<Item>::iterator it = qUpperBound(filtered.begin(), filtered.end(), i);
+            QList<Item>::iterator it = std::upper_bound(filtered.begin(), filtered.end(), i);
             uint rowNumber = it - filtered.begin();
 
             if (notifyModel) {
@@ -1671,7 +1684,7 @@ void KateCompletionModel::setSortingAlphabetical(bool alphabetical)
 
 void KateCompletionModel::Group::resort()
 {
-    qStableSort(filtered.begin(), filtered.end());
+    std::stable_sort(filtered.begin(), filtered.end());
     model->hideOrShowGroup(this);
 }
 
@@ -1873,17 +1886,22 @@ bool KateCompletionModel::shouldMatchHideCompletionList() const
     return doHide;
 }
 
+static inline QChar toLowerIfInsensitive(QChar c, Qt::CaseSensitivity caseSensitive) 
+{
+    return (caseSensitive == Qt::CaseInsensitive) ? c.toLower() : c;
+}
+
 static inline bool matchesAbbreviationHelper(const QString &word, const QString &typed, const QVarLengthArray<int, 32> &offsets,
-        int &depth, int atWord = -1, int i = 0)
+        Qt::CaseSensitivity caseSensitive, int &depth, int atWord = -1, int i = 0)
 {
     int atLetter = 1;
     for (; i < typed.size(); i++) {
-        const QChar c = typed.at(i).toLower();
+        const QChar c = toLowerIfInsensitive(typed.at(i), caseSensitive);
         bool haveNextWord = offsets.size() > atWord + 1;
         bool canCompare = atWord != -1 && word.size() > offsets.at(atWord) + atLetter;
-        if (canCompare && c == word.at(offsets.at(atWord) + atLetter).toLower()) {
+        if (canCompare && c == toLowerIfInsensitive(word.at(offsets.at(atWord) + atLetter), caseSensitive)) {
             // the typed letter matches a letter after the current word beginning
-            if (! haveNextWord || c != word.at(offsets.at(atWord + 1)).toLower()) {
+            if (! haveNextWord || c != toLowerIfInsensitive(word.at(offsets.at(atWord + 1)), caseSensitive)) {
                 // good, simple case, no conflict
                 atLetter += 1;
                 continue;
@@ -1896,14 +1914,14 @@ static inline bool matchesAbbreviationHelper(const QString &word, const QString 
                 return false;
             }
             // the letter matches both the next word beginning and the next character in the word
-            if (haveNextWord && matchesAbbreviationHelper(word, typed, offsets, depth, atWord + 1, i + 1)) {
+            if (haveNextWord && matchesAbbreviationHelper(word, typed, offsets, caseSensitive, depth, atWord + 1, i + 1)) {
                 // resolving the conflict by taking the next word's first character worked, fine
                 return true;
             }
             // otherwise, continue by taking the next letter in the current word.
             atLetter += 1;
             continue;
-        } else if (haveNextWord && c == word.at(offsets.at(atWord + 1)).toLower()) {
+        } else if (haveNextWord && c == toLowerIfInsensitive(word.at(offsets.at(atWord + 1)), caseSensitive)) {
             // the typed letter matches the next word beginning
             atWord++;
             atLetter = 1;
@@ -1916,18 +1934,18 @@ static inline bool matchesAbbreviationHelper(const QString &word, const QString 
     return true;
 }
 
-bool KateCompletionModel::matchesAbbreviation(const QString &word, const QString &typed)
+bool KateCompletionModel::matchesAbbreviation(const QString &word, const QString &typed, Qt::CaseSensitivity caseSensitive)
 {
     // A mismatch is very likely for random even for the first letter,
     // thus this optimization makes sense.
-    if (word.at(0).toLower() != typed.at(0).toLower()) {
+    if (toLowerIfInsensitive(word.at(0), caseSensitive) != toLowerIfInsensitive(typed.at(0), caseSensitive)) {
         return false;
     }
 
     // First, check if all letters are contained in the word in the right order.
     int atLetter = 0;
     foreach (const QChar c, typed) {
-        while (c.toLower() != word.at(atLetter).toLower()) {
+        while (toLowerIfInsensitive(c, caseSensitive) != toLowerIfInsensitive(word.at(atLetter), caseSensitive)) {
             atLetter += 1;
             if (atLetter >= word.size()) {
                 return false;
@@ -1940,7 +1958,7 @@ bool KateCompletionModel::matchesAbbreviation(const QString &word, const QString
     // We want to make "KComplM" match "KateCompletionModel"; this means we need
     // to allow parts of the typed text to be not part of the actual abbreviation,
     // which consists only of the uppercased / underscored letters (so "KCM" in this case).
-    // However it might be ambigous whether a letter is part of such a word or part of
+    // However it might be ambiguous whether a letter is part of such a word or part of
     // the following abbreviation, so we need to find all possible word offsets first,
     // then compare.
     for (int i = 0; i < word.size(); i++) {
@@ -1953,7 +1971,7 @@ bool KateCompletionModel::matchesAbbreviation(const QString &word, const QString
         }
     }
     int depth = 0;
-    return matchesAbbreviationHelper(word, typed, offsets, depth);
+    return matchesAbbreviationHelper(word, typed, offsets, caseSensitive, depth);
 }
 
 static inline bool containsAtWordBeginning(const QString &word, const QString &typed, Qt::CaseSensitivity caseSensitive)
@@ -1991,7 +2009,7 @@ KateCompletionModel::Item::MatchType KateCompletionModel::Item::match()
     matchCompletion = (m_nameColumn.startsWith(match, model->matchCaseSensitivity()) ? StartsWithMatch : NoMatch);
     if (matchCompletion == NoMatch) {
         // if no match, try for "contains"
-        // Only match when the occurence is at a "word" beginning, marked by
+        // Only match when the occurrence is at a "word" beginning, marked by
         // an underscore or a capital. So Foo matches BarFoo and Bar_Foo, but not barfoo.
         // Starting at 1 saves looking at the beginning of the word, that was already checked above.
         if (containsAtWordBeginning(m_nameColumn, match, model->matchCaseSensitivity())) {
@@ -2001,12 +2019,17 @@ KateCompletionModel::Item::MatchType KateCompletionModel::Item::match()
 
     if (matchCompletion == NoMatch && !m_nameColumn.isEmpty() && !match.isEmpty()) {
         // if still no match, try abbreviation matching
-        if (matchesAbbreviation(m_nameColumn, match)) {
+        if (matchesAbbreviation(m_nameColumn, match, model->matchCaseSensitivity())) {
             matchCompletion = AbbreviationMatch;
         }
     }
 
     if (matchCompletion && match.length() == m_nameColumn.length()) {
+        if (model->matchCaseSensitivity() == Qt::CaseInsensitive &&
+            model->exactMatchCaseSensitivity() == Qt::CaseSensitive &&
+            !m_nameColumn.startsWith(match, Qt::CaseSensitive)) {
+            return matchCompletion;
+        }
         matchCompletion = PerfectMatch;
         m_haveExactMatch = true;
     }
@@ -2116,6 +2139,11 @@ QString KateCompletionModel::currentCompletion(KTextEditor::CodeCompletionModel 
 Qt::CaseSensitivity KateCompletionModel::matchCaseSensitivity() const
 {
     return m_matchCaseSensitivity;
+}
+
+Qt::CaseSensitivity KateCompletionModel::exactMatchCaseSensitivity() const
+{
+    return m_exactMatchCaseSensitivity;
 }
 
 void KateCompletionModel::addCompletionModel(KTextEditor::CodeCompletionModel *model)

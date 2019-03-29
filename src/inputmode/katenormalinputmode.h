@@ -16,8 +16,8 @@
  *  Boston, MA 02110-1301, USA.
  */
 
-#ifndef __KATE_NORMAL_INPUT_MODE_H__
-#define __KATE_NORMAL_INPUT_MODE_H__
+#ifndef KATE_NORMAL_INPUT_MODE_H
+#define KATE_NORMAL_INPUT_MODE_H
 
 #include "kateabstractinputmode.h"
 
@@ -27,7 +27,7 @@ class KateCommandLineBar;
 
 class KateNormalInputMode : public KateAbstractInputMode
 {
-    KateNormalInputMode(KateViewInternal *viewInternal);
+    explicit KateNormalInputMode(KateViewInternal *viewInternal);
     friend KateNormalInputModeFactory;
 
 public:

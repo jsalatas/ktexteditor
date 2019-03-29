@@ -18,8 +18,8 @@
    Boston, MA 02110-1301, USA.
 */
 
-#ifndef KATE_UNDOMANAGER_TEST_H
-#define KATE_UNDOMANAGER_TEST_H
+#ifndef KATE_TEMPLATEHANDLER_TEST_H
+#define KATE_TEMPLATEHANDLER_TEST_H
 
 #include <QObject>
 
@@ -35,6 +35,9 @@ private Q_SLOTS:
 
     void testSimpleMirror();
     void testSimpleMirror_data();
+
+    void testAlignC();
+    void testAlignC_data();
 
     void testDefaults();
     void testDefaults_data();

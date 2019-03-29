@@ -41,6 +41,7 @@ class KateViewAccessible : public QAccessibleWidget, public QAccessibleTextInter
 public:
     explicit KateViewAccessible(KateViewInternal *view)
         : QAccessibleWidget(view, QAccessible::EditableText)
+        , m_lastPosition(-1)
     {
         // to invalidate positionFromCursor cache when the document is changed
         m_conn = QObject::connect(view->view()->document(), &KTextEditor::Document::textChanged,
@@ -190,7 +191,7 @@ public:
      * When possible, using the last returned value m_lastPosition do the count
      * from the last cursor position m_lastCursor.
      * @return the number of chars (including one character for new lines)
-     *         from the beggining of the file.
+     *         from the beginning of the file.
      */
     int positionFromCursor(KateViewInternal *view, const KTextEditor::Cursor &cursor) const
     {

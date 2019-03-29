@@ -38,8 +38,10 @@ namespace KTextEditor { class DocumentPrivate; }
 class EditorConfig
 {
 public:
-    EditorConfig(KTextEditor::DocumentPrivate *document);
+    explicit EditorConfig(KTextEditor::DocumentPrivate *document);
     ~EditorConfig();
+    EditorConfig(const EditorConfig &) = delete;
+    EditorConfig& operator=(const EditorConfig &) = delete;
     /**
      * Runs EditorConfig parser and sets proper parent DocumentPrivate
      * configuration. Implemented options: charset, end_of_line, indent_size,

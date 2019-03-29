@@ -38,6 +38,7 @@ set (KTEXTEDITOR_TEST_LINK_LIBS KF5TextEditor
   KF5::I18n
   KF5::IconThemes
   KF5::GuiAddons
+  KF5::SyntaxHighlighting
   Qt5::Qml
 )
 
@@ -100,7 +101,12 @@ ENDMACRO(KTEXTEDITOR_INDENT_TEST)
 # test different indenters sepearately to have smaller test chunks, that takes LONG
 KTEXTEDITOR_INDENT_TEST ("testPython")
 KTEXTEDITOR_INDENT_TEST ("testCstyle")
-KTEXTEDITOR_INDENT_TEST ("testCppstyle")
+
+# guard against execution with qt that has broken QJSEngine regex, see: https://bugreports.qt.io/browse/QTBUG-72879
+if (NOT Qt5Widgets_VERSION VERSION_EQUAL 5.12.0)
+    KTEXTEDITOR_INDENT_TEST ("testCppstyle")
+endif()
+
 KTEXTEDITOR_INDENT_TEST ("testCMake")
 KTEXTEDITOR_INDENT_TEST ("testRuby")
 KTEXTEDITOR_INDENT_TEST ("testHaskell")
@@ -136,6 +142,8 @@ ecm_add_tests(
   src/kateview_test.cpp
   src/revision_test.cpp
   src/modificationsystem_test.cpp
+  src/inlinenote_test.cpp
+  src/variable_test.cpp
   src/templatehandler_test.cpp
   src/katefoldingtest.cpp
   src/bug286887.cpp
@@ -150,7 +158,6 @@ ktexteditor_unit_test(scripting_test src/script_test_base.cpp src/testutils.cpp)
 ktexteditor_unit_test(bug313759 src/testutils.cpp)
 ktexteditor_unit_test(bug317111 src/testutils.cpp)
 ktexteditor_unit_test(bug205447 src/testutils.cpp)
-ktexteditor_unit_test(katesyntaxtest)
 
 if (BUILD_VIMODE)
   add_subdirectory(src/vimode)

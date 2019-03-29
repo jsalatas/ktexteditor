@@ -31,7 +31,6 @@
 
 KateUndo::KateUndo(KTextEditor::DocumentPrivate *document)
     : m_document(document)
-    , m_lineModFlags(0x00)
 {
 }
 
@@ -109,10 +108,10 @@ bool KateUndo::mergeWith(const KateUndo * /*undo*/)
 
 bool KateEditInsertTextUndo::mergeWith(const KateUndo *undo)
 {
-    const KateEditInsertTextUndo *u = dynamic_cast<const KateEditInsertTextUndo *>(undo);
-    if (u != nullptr
-            && m_line == u->m_line
-            && (m_col + len()) == u->m_col) {
+    // we can do a hard cast, we ensure we are only called with the same types on the outside
+    Q_ASSERT(type() == undo->type());
+    const KateEditInsertTextUndo *u = static_cast<const KateEditInsertTextUndo *>(undo);
+    if (m_line == u->m_line && (m_col + len()) == u->m_col) {
         m_text += u->m_text;
         return true;
     }
@@ -122,11 +121,10 @@ bool KateEditInsertTextUndo::mergeWith(const KateUndo *undo)
 
 bool KateEditRemoveTextUndo::mergeWith(const KateUndo *undo)
 {
-    const KateEditRemoveTextUndo *u = dynamic_cast<const KateEditRemoveTextUndo *>(undo);
-
-    if (u != nullptr
-            && m_line == u->m_line
-            && m_col == (u->m_col + u->len())) {
+    // we can do a hard cast, we ensure we are only called with the same types on the outside
+    Q_ASSERT(type() == undo->type());
+    const KateEditRemoveTextUndo *u = static_cast<const KateEditRemoveTextUndo *>(undo);
+    if (m_line == u->m_line && m_col == (u->m_col + u->len())) {
         m_text.prepend(u->m_text);
         m_col = u->m_col;
         return true;
@@ -237,7 +235,6 @@ KateUndoGroup::KateUndoGroup(KateUndoManager *manager,
                              const QVector<KTextEditor::Cursor> &cursorPosition,
                              const QVector<KTextEditor::Range> &selectionRange)
     : m_manager(manager)
-    , m_safePoint(false)
     , m_undoSelection(selectionRange)
     , m_redoSelection()
     , m_undoCursor(cursorPosition)
@@ -297,13 +294,20 @@ void KateUndoGroup::editEnd(const QVector<KTextEditor::Cursor> &cursorPosition, 
 
 void KateUndoGroup::addItem(KateUndo *u)
 {
+    // kill empty items
     if (u->isEmpty()) {
         delete u;
-    } else if (!m_items.isEmpty() && m_items.last()->mergeWith(u)) {
-        delete u;
-    } else {
-        m_items.append(u);
+        return;
     }
+
+    // try to merge, do that only for equal types, inside mergeWith we do hard casts
+    if (!m_items.isEmpty() && m_items.last()->type() == u->type() && m_items.last()->mergeWith(u)) {
+        delete u;
+        return;
+    }
+
+    // default: just add new item unchanged
+    m_items.append(u);
 }
 
 bool KateUndoGroup::merge(KateUndoGroup *newGroup, bool complex)

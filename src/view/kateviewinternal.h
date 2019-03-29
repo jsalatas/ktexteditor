@@ -34,6 +34,7 @@
 #include "katedocument.h"
 #include "kateview.h"
 #include "katerenderer.h"
+#include "inlinenotedata.h"
 
 #include <QPoint>
 #include <QTimer>
@@ -54,6 +55,8 @@ class TextHintProvider;
 
 class KateIconBorder;
 class KateScrollBar;
+class KateAnnotationItemDelegate;
+class KateAnnotationGroupPositionState;
 class KateTextLayout;
 class KateTextAnimation;
 class KateAbstractInputMode;
@@ -68,6 +71,8 @@ class KateViewInternal : public QWidget
     friend class KTextEditor::ViewPrivate;
     friend class KateIconBorder;
     friend class KateScrollBar;
+    friend class KateAnnotationItemDelegate;
+    friend class KateAnnotationGroupPositionState;
     friend class CalculatingCursor;
     friend class BoundedCursor;
     friend class WrappingCursor;
@@ -83,7 +88,7 @@ public:
     };
 
 public:
-    KateViewInternal(KTextEditor::ViewPrivate *view);
+    explicit KateViewInternal(KTextEditor::ViewPrivate *view);
     ~KateViewInternal() override;
     KTextEditor::ViewPrivate *view() const
     {
@@ -126,8 +131,6 @@ private Q_SLOTS:
     void updateView(bool changed = false, int viewLinesScrolled = 0);
 
 private:
-    // Actually performs the updating, but doesn't call update().
-    void doUpdateView(bool changed = false, int viewLinesScrolled = 0);
     void makeVisible(const KTextEditor::Cursor &c, int endCol, bool force = false, bool center = false, bool calledExternally = false);
 
 public:
@@ -198,11 +201,28 @@ public:
     void top_home(bool sel = false);
     void bottom_end(bool sel = false);
 
+     /**
+     * Accessor to the current caret position
+     * @return position of the caret as @c KTextEditor::Cursor
+     * @see KTextEditor::Cursor
+     */
+    KTextEditor::Cursor cursorPosition() const
+    {
+        return primaryCursor;
+    }
+
     KTextEditor::Cursor primaryCursor() const
     {
         return m_cursors.primaryCursor();
     }
-    KTextEditor::Cursor getMouse() const
+
+
+    /**
+     * Accessor to the current mouse position
+     * @return position of the mouse as @c KTextEditor::Cursor
+     * @see KTextEditor::Cursor
+     */
+    KTextEditor::Cursor mousePosition() const
     {
         return m_mouse;
     }
@@ -375,12 +395,12 @@ private:
     bool m_selChangedByUser;
     KTextEditor::Cursor m_selectAnchor;
 
-
-//     uint m_selectionMode;
-//     // when drag selecting after double/triple click, keep the initial selected
-//     // word/line independent of direction.
-//     // They get set in the event of a double click, and is used with mouse move + leftbutton
-//     KTextEditor::Range m_selectionCached;
+    enum SelectionMode { Default = 0, Mouse, Word, Line }; ///< for drag selection.
+    uint m_selectionMode;
+    // when drag selecting after double/triple click, keep the initial selected
+    // word/line independent of direction.
+    // They get set in the event of a double click, and is used with mouse move + leftbutton
+    KTextEditor::Range m_selectionCached;
 
     // maximal length of textlines visible from given startLine
     int maxLen(int startLine);
@@ -406,10 +426,14 @@ private:
     // find the cursor offset by (offset) view lines from a cursor.
     // when keepX is true, the column position will be calculated based on the x
     // position of the specified cursor.
-    KTextEditor::Cursor viewLineOffset(const KTextEditor::Cursor &virtualCursor, int offset);
+    KTextEditor::Cursor viewLineOffset(const KTextEditor::Cursor &virtualCursor, int offset, bool keepX = false);
 
     KTextEditor::Cursor toRealCursor(const KTextEditor::Cursor &virtualCursor) const;
     KTextEditor::Cursor toVirtualCursor(const KTextEditor::Cursor &realCursor) const;
+
+    // These variable holds the most recent maximum real & visible column number
+    bool m_preserveX;
+    int m_preservedX;
 
     int m_wrapChangeViewLine;
     KTextEditor::Cursor m_cachedMaxStartPos;
@@ -491,6 +515,10 @@ private:
 private:
     QMap<KTextEditor::View::InputMode, KateAbstractInputMode *> m_inputModes;
     KateAbstractInputMode *m_currentInputMode;
+
+    KateInlineNoteData m_activeInlineNote;
+    KateInlineNoteData inlineNoteAt(const QPoint& globalPos) const;
+    QRect inlineNoteRect(const KateInlineNoteData& note) const;
 };
 
 #endif

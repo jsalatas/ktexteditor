@@ -1,6 +1,6 @@
 /* This file is part of the KDE project
 
-   Copyright (C) 2011 Dominik Haumann <dhaumann kde org>
+   Copyright (C) 2011-2018 Dominik Haumann <dhaumann@kde.org>
 
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
@@ -53,7 +53,7 @@ class VariableEditor : public QWidget
     Q_OBJECT
 
 public:
-    VariableEditor(VariableItem *item, QWidget *parent = nullptr);
+    explicit VariableEditor(VariableItem *item, QWidget *parent = nullptr);
     ~VariableEditor() override;
 
     VariableItem *item() const;

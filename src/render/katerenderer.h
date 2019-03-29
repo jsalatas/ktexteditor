@@ -20,12 +20,13 @@
    Boston, MA 02110-1301, USA.
 */
 
-#ifndef __KATE_RENDERER_H__
-#define __KATE_RENDERER_H__
+#ifndef KATE_RENDERER_H
+#define KATE_RENDERER_H
 
 #include <ktexteditor/attribute.h>
 #include "katetextline.h"
 #include "katelinelayout.h"
+#include "kateconfig.h"
 
 #include <QFont>
 #include <QFontMetricsF>
@@ -85,6 +86,9 @@ public:
      * Destructor
      */
     ~KateRenderer();
+
+    KateRenderer(const KateRenderer &) = delete;
+    KateRenderer& operator=(const KateRenderer &) = delete;
 
     /**
      * Returns the document to which this renderer is bound
@@ -169,17 +173,17 @@ public:
     void setShowTabs(bool showTabs);
 
     /**
-     * @returns whether trailing spaces should be shown.
+     * Set which spaces should be rendered
      */
-    inline bool showTrailingSpaces() const
+    void setShowSpaces(KateDocumentConfig::WhitespaceRendering showSpaces);
+
+    /**
+     * @returns whether which spaces should be rendered
+     */
+    inline KateDocumentConfig::WhitespaceRendering showSpaces() const
     {
         return m_showSpaces;
     }
-
-    /**
-     * Set whether a mark should be painted for trailing spaces.
-     */
-    void setShowTrailingSpaces(bool showSpaces);
 
 	/**
 	 * Update marker size shown.
@@ -282,7 +286,7 @@ public:
      *
      * \param selectionsOnly return decorations for selections and/or dynamic highlighting.
      */
-    QList<QTextLayout::FormatRange> decorationsForLine(const Kate::TextLine &textLine, int line, bool selectionsOnly = false, KateRenderRange *completionHighlight = nullptr, bool completionSelected = false) const;
+    QVector<QTextLayout::FormatRange> decorationsForLine(const Kate::TextLine &textLine, int line, bool selectionsOnly = false, KateRenderRange *completionHighlight = nullptr, bool completionSelected = false) const;
 
     // Width calculators
     qreal spaceWidth() const;
@@ -366,7 +370,7 @@ private:
     /**
      * Paint a trailing space on position (x, y).
      */
-    void paintTrailingSpace(QPainter &paint, qreal x, qreal y);
+    void paintSpace(QPainter &paint, qreal x, qreal y);
     /**
      * Paint a tab stop marker on position (x, y).
      */
@@ -404,13 +408,13 @@ private:
     bool m_drawCaret;
     bool m_showSelections;
     bool m_showTabs;
-    bool m_showSpaces;
+    KateDocumentConfig::WhitespaceRendering m_showSpaces = KateDocumentConfig::None;
     float m_markerSize;
     bool m_showNonPrintableSpaces;
     bool m_printerFriendly;
     QColor m_caretOverrideColor;
 
-    QList<KTextEditor::Attribute::Ptr> m_attributes;
+    QVector<KTextEditor::Attribute::Ptr> m_attributes;
 
     /**
      * Configuration

@@ -1,5 +1,5 @@
 /* This file is part of the KDE libraries
-   Copyright (C) 2010 Dominik Haumann <dhaumann kde org>
+   Copyright (C) 2010-2018 Dominik Haumann <dhaumann@kde.org>
 
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
@@ -126,6 +126,26 @@ void KateDocumentTest::testWordWrap()
     doc.insertText(c->toCursor(), QLatin1String("ooooooooooo"));
     QCOMPARE(doc.text(), secondWrap);
     QCOMPARE(c->toCursor(), Cursor(1, 15));
+}
+
+void KateDocumentTest::testWrapParagraph()
+{
+    // Each paragraph must be kept as an own but re-wrapped nicely
+    KTextEditor::DocumentPrivate doc(false, false);
+    doc.setWordWrapAt(30); // Keep needed test data small
+
+    const QString before = QLatin1String("aaaaa a aaaa\naaaaa aaa aa aaaa aaaa \naaaa a aaa aaaaaaa a aaaa\n\nxxxxx x\nxxxx xxxxx\nxxx xx xxxx \nxxxx xxxx x xxx xxxxxxx x xxxx");
+    const QString after = QLatin1String("aaaaa a aaaa aaaaa aaa aa aaaa \naaaa aaaa a aaa aaaaaaa a aaaa\n\nxxxxx x xxxx xxxxx xxx xx xxxx \nxxxx xxxx x xxx xxxxxxx x xxxx");
+
+    doc.setWordWrap(false); // First we try with disabled hard wrap
+    doc.setText(before);
+    doc.wrapParagraph(0, doc.lines() - 1);
+    QCOMPARE(doc.text(), after);
+
+    doc.setWordWrap(true); // Test again with enabled hard wrap, that had cause trouble due to twice wrapping
+    doc.setText(before);
+    doc.wrapParagraph(0, doc.lines() - 1);
+    QCOMPARE(doc.text(), after);
 }
 
 void KateDocumentTest::testReplaceQStringList()

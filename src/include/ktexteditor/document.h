@@ -69,7 +69,7 @@ enum SearchOption {
     EscapeSequences     = 1 << 10, ///< Plaintext mode: Processes escape sequences
     WholeWords          = 1 << 11, ///< Plaintext mode: Whole words only, e.g. @em not &quot;amp&quot; in &quot;example&quot;
 
-    MaxSearchOption     = 1 << 31  ///< Placeholder for binary compatability
+    MaxSearchOption     = 1 << 31  ///< Placeholder for binary compatibility
 };
 
 Q_DECLARE_FLAGS(SearchOptions, SearchOption)
@@ -123,7 +123,7 @@ Q_DECLARE_OPERATORS_FOR_FLAGS(SearchOptions)
  * textChanged() are emitted. Whether an editing transaction is currently active
  * can be checked by calling isEditingTransactionRunning().
  *
- * @note The signal editingFinished() is always emitted when the last istance
+ * @note The signal editingFinished() is always emitted when the last instance
  *       of EditingTransaction is destroyed. Contrary, the signal textChanged()
  *       is emitted only if text changed. Hence, textChanged() is more accurate
  *       with respect to changes in the Document.
@@ -393,9 +393,11 @@ public:
     bool openingError() const;
 
     /**
-     * Error message if any problem occured on last load.
+     * Error message if any problem occurred on last load.
      * @return error message what went wrong on loading
      */
+    // TODO KF6: Not needed anymore since we show load trouble as KTextEditor::Message.
+    //      Remove all code which set m_openingErrorMessage
     QString openingErrorMessage() const;
 
     /*
@@ -489,7 +491,7 @@ public:
             explicit EditingTransaction(Document *document);
 
             /**
-             * Destructs the object and, if needed, finishs a running editing
+             * Destructs the object and, if needed, finishes a running editing
              * transaction by calling finish().
              *
              * @see finish()

@@ -39,7 +39,7 @@ class KateSpellCheckManager : public QObject
     typedef QPair<KTextEditor::Range, QString> RangeDictionaryPair;
 
 public:
-    KateSpellCheckManager(QObject *parent = nullptr);
+    explicit KateSpellCheckManager(QObject *parent = nullptr);
     virtual ~KateSpellCheckManager();
 
     QStringList suggestions(const QString &word, const QString &dictionary);
@@ -51,6 +51,14 @@ public:
      * 'r2' is a subrange of 'r1', which is extracted from 'r1' and the remaining ranges are returned
      **/
     static QList<KTextEditor::Range> rangeDifference(const KTextEditor::Range &r1, const KTextEditor::Range &r2);
+
+Q_SIGNALS:
+    /**
+     * These signals are used to propagate the dictionary changes to the
+     * BackgroundChecker instance in other components (e.g. onTheFlyChecker).
+     */
+    void wordAddedToDictionary(const QString &word);
+    void wordIgnored(const QString &word);
 
 public:
     QList<QPair<KTextEditor::Range, QString> > spellCheckLanguageRanges(KTextEditor::DocumentPrivate *doc, const KTextEditor::Range &range);

@@ -950,7 +950,7 @@ void EmulatedCommandBarTest::EmulatedCommandBarTests()
   // An unescaped ']' not between other square brackets is a literal.
   DoTest("foo xbaba]y", "/x[ab]\\\\+]y\\enterrX", "foo Xbaba]y");
   DoTest("foo xbaba]dcdcy", "/x[ab]\\\\+][cd]\\\\+y\\enterrX", "foo Xbaba]dcdcy");
-  // Be more clever about how we indentify escaping: the presence of a preceding
+  // Be more clever about how we identify escaping: the presence of a preceding
   // backslash is not always sufficient!
   DoTest("foo x\\babay", "/x\\\\\\\\[ab]\\\\+y\\enterrX", "foo X\\babay");
   DoTest("foo x\\[abc]]]]y", "/x\\\\\\\\\\\\[abc]\\\\+y\\enterrX", "foo X\\[abc]]]]y");
@@ -1333,7 +1333,7 @@ void EmulatedCommandBarTest::EmulatedCommandBarTests()
   TestPressKey("/\\ctrl- ");
   const int lastItemRow = 25;
   const QRect initialLastCompletionItemRect = emulatedCommandBarCompleter()->popup()->visualRect(emulatedCommandBarCompleter()->popup()->model()->index(lastItemRow, 0));
-  QVERIFY(!emulatedCommandBarCompleter()->popup()->rect().contains(initialLastCompletionItemRect)); // If this fails, then we have an error in the test setup: initally, the last item in the list should be outside of the bounds of the popup.
+  QVERIFY(!emulatedCommandBarCompleter()->popup()->rect().contains(initialLastCompletionItemRect)); // If this fails, then we have an error in the test setup: initially, the last item in the list should be outside of the bounds of the popup.
   TestPressKey("\\ctrl-n");
   QCOMPARE(emulatedCommandBarCompleter()->currentCompletion(), QString("z"));
   const QRect lastCompletionItemRect = emulatedCommandBarCompleter()->popup()->visualRect(emulatedCommandBarCompleter()->popup()->model()->index(lastItemRow, 0));
@@ -1727,7 +1727,7 @@ void EmulatedCommandBarTest::EmulatedCommandBarTests()
   TestPressKey(":set-\\ctrl-p");
   verifyCommandBarCompletionVisible();
   QVERIFY(emulatedCommandBarTextEdit()->text() != "set-");
-  QVERIFY(emulatedCommandBarCompleter()->currentCompletion().startsWith("set-"));
+  QVERIFY(emulatedCommandBarCompleter()->currentCompletion().startsWith(QLatin1String("set-")));
   QCOMPARE(emulatedCommandBarTextEdit()->text(), emulatedCommandBarCompleter()->currentCompletion());
   TestPressKey("\\ctrl-c"); // Dismiss completion.
   TestPressKey("\\ctrl-c"); // Dismiss bar.
@@ -2806,7 +2806,7 @@ void EmulatedCommandBarTest::EmulatedCommandBarTests()
 
   // Make sure the incremental search bar label contains a reference to the text we're going to
   // replace with.
-  // We're going to be a bit vague about the precise text due to localisation issues.
+  // We're going to be a bit vague about the precise text due to localization issues.
   BeginTest("fabababbbar");
   TestPressKey(":s/f\\\\([ab]\\\\+\\\\)/1\\\\U\\\\12/c\\enter");
   QVERIFY(interactiveSedReplaceLabel->text().contains("1ABABABBBA2"));
@@ -3340,7 +3340,7 @@ void EmulatedCommandBarTest::verifyShowsNumberOfReplacementsAcrossNumberOfLines(
   const QString commandMessageResponseText = commandResponseMessageDisplay()->text();
   const QString expectedNumReplacementsAsString = QString::number(numReplacements);
   const QString expectedAcrossNumLinesAsString = QString::number(acrossNumLines);
-  // Be a bit vague about the actual contents due to e.g. localisation.
+  // Be a bit vague about the actual contents due to e.g. localization.
   // TODO - see if we can insist that en_US is available on the Kate Jenkins server and
   // insist that we use it ... ?
   QRegExp numReplacementsMessageRegex("^.*(\\d+).*(\\d+).*$");

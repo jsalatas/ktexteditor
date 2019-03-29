@@ -18,6 +18,9 @@
  *  Boston, MA 02110-1301, USA.
  */
 
+#ifndef EMULATEDCOMMANDBARSETUPANDTEARDOWN_H
+#define EMULATEDCOMMANDBARSETUPANDTEARDOWN_H
+
 #include <QObject>
 
 namespace KTextEditor
@@ -37,7 +40,7 @@ class WindowKeepActive : public QObject
     Q_OBJECT
 
     public:
-        WindowKeepActive(QMainWindow *mainWindow);
+        explicit WindowKeepActive(QMainWindow *mainWindow);
 
         public Q_SLOTS:
             bool eventFilter(QObject *object, QEvent *event) override;
@@ -66,3 +69,4 @@ class EmulatedCommandBarSetUpAndTearDown
         KateViInputMode *m_viInputMode;
 };
 
+#endif

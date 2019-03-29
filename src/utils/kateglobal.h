@@ -19,11 +19,12 @@
  *  Boston, MA 02110-1301, USA.
  */
 
-#ifndef __KATE_GLOBAL_H__
-#define __KATE_GLOBAL_H__
+#ifndef KATE_GLOBAL_H
+#define KATE_GLOBAL_H
 
 #include <ktexteditor_export.h>
 #include "katescript.h"
+#include "variable.h"
 
 #include <ktexteditor/editor.h>
 #include "ktexteditor/view.h"
@@ -98,7 +99,7 @@ private:
      * Default constructor, private, as singleton
      * @param staticInstance pointer to fill with content of this
      */
-    EditorPrivate(QPointer<KTextEditor::EditorPrivate> &staticInstance);
+    explicit EditorPrivate(QPointer<KTextEditor::EditorPrivate> &staticInstance);
 
 public:
     /**
@@ -240,13 +241,7 @@ public:
      * The global configuration of katepart, e.g. katepartrc
      * @return global shared access to katepartrc config
      */
-    static KSharedConfigPtr config()
-    {
-        // use dummy config for unit tests!
-        return KTextEditor::EditorPrivate::unitTestMode()
-            ? KSharedConfig::openConfig(QStringLiteral("katepartrc-unittest"), KConfig::SimpleConfig, QStandardPaths::TempLocation)
-            : KSharedConfig::openConfig(QStringLiteral("katepartrc"));
-    }
+    static KSharedConfigPtr config();
 
     /**
      * global mode manager
@@ -560,6 +555,16 @@ private:
      */
     QStringListModel *m_searchHistoryModel;
     QStringListModel *m_replaceHistoryModel;
+
+    /**
+     * Contains a lookup from the variable to the Variable instance.
+     */
+    QHash<QString, KTextEditor::Variable> m_variableExactMatches;
+
+    /**
+     * Contains a lookup from the variable prefix to the Variable instance.
+     */
+    QHash<QString, KTextEditor::Variable> m_variablePrefixMatches;
 };
 
 }

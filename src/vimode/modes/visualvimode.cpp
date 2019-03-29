@@ -46,7 +46,7 @@ VisualViMode::VisualViMode(InputModeManager *viInputModeManager,
     m_mode = ViMode::VisualMode;
     initializeCommands();
 
-    connect(m_view, SIGNAL(selectionChanged(KTextEditor::View *)),
+    connect(m_view, SIGNAL(selectionChanged(KTextEditor::View*)),
             this, SLOT(updateSelection()));
 }
 
@@ -259,7 +259,7 @@ void VisualViMode::updateSelection()
         return;
     }
 
-    // If alredy not in visual mode, it's time to go there.
+    // If already not in visual mode, it's time to go there.
     if (m_viInputModeManager->getCurrentViMode() != ViMode::VisualMode) {
         commandEnterVisualMode();
     }

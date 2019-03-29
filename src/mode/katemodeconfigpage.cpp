@@ -27,7 +27,6 @@
 #include "kateglobal.h"
 #include "kateautoindent.h"
 #include "katesyntaxmanager.h"
-#include "katesyntaxdocument.h"
 
 #include "ui_filetypeconfigwidget.h"
 
@@ -42,6 +41,7 @@
 #include <QLayout>
 #include <QPushButton>
 #include <QToolButton>
+#include <QSpinBox>
 //END Includes
 
 ModeConfigPage::ModeConfigPage(QWidget *parent)
@@ -58,12 +58,11 @@ ModeConfigPage::ModeConfigPage(QWidget *parent)
     ui->setupUi(newWidget);
 
     ui->cmbHl->addItem(i18n("<Unchanged>"), QVariant(QString()));
-    for (int i = 0; i < KateHlManager::self()->highlights(); i++) {
-        if (KateHlManager::self()->hlSection(i).length() > 0)
-            ui->cmbHl->addItem(KateHlManager::self()->hlSection(i) + QLatin1String("/")
-                               + KateHlManager::self()->hlNameTranslated(i), QVariant(KateHlManager::self()->hlName(i)));
+   for (const auto &hl : KateHlManager::self()->modeList()) {
+        if (hl.section().length() > 0)
+            ui->cmbHl->addItem(hl.section() + QLatin1String("/") + hl.translatedName(), QVariant(hl.name()));
         else {
-            ui->cmbHl->addItem(KateHlManager::self()->hlNameTranslated(i), QVariant(KateHlManager::self()->hlName(i)));
+            ui->cmbHl->addItem(hl.translatedName(), QVariant(hl.name()));
         }
     }
 
@@ -77,7 +76,6 @@ ModeConfigPage::ModeConfigPage(QWidget *parent)
     connect(ui->btnDelete, SIGNAL(clicked()), this, SLOT(deleteType()));
     ui->btnMimeTypes->setIcon(QIcon::fromTheme(QStringLiteral("tools-wizard")));
     connect(ui->btnMimeTypes, SIGNAL(clicked()), this, SLOT(showMTDlg()));
-    connect(ui->btnDownload, SIGNAL(clicked()), this, SLOT(hlDownload()));
 
     reload();
 
@@ -89,6 +87,9 @@ ModeConfigPage::ModeConfigPage(QWidget *parent)
     connect(ui->sbPriority, SIGNAL(valueChanged(int)), this, SLOT(slotChanged()));
     connect(ui->cmbHl, SIGNAL(activated(int)), this, SLOT(slotChanged()));
     connect(ui->cmbIndenter, SIGNAL(activated(int)), this, SLOT(slotChanged()));
+
+    // make the context help a bit easier to access
+    ui->sbPriority->setToolTip(ui->sbPriority->whatsThis());
 
     layout->addWidget(newWidget);
     setLayout(layout);
@@ -294,12 +295,6 @@ void ModeConfigPage::showMTDlg()
         ui->edtFileExtensions->setText(d.chooser()->patterns().join(QLatin1Char(';')));
         ui->edtMimeTypes->setText(d.chooser()->mimeTypes().join(QLatin1Char(';')));
     }
-}
-
-void ModeConfigPage::hlDownload()
-{
-    KateHlDownloadDialog diag(this, "hlDownload", true);
-    diag.exec();
 }
 
 QString ModeConfigPage::name() const

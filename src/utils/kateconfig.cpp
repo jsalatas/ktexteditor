@@ -32,17 +32,80 @@
 #include <KConfigGroup>
 #include <KCharsets>
 
+#include <QSettings>
 #include <QTextCodec>
 #include <QStringListModel>
-#include <QSettings>
 
 //BEGIN KateConfig
-KateConfig::KateConfig()
+KateConfig::KateConfig(const KateConfig *parent)
+    : m_parent(parent)
+    , m_configKeys(m_parent ? nullptr : new QStringList())
+    , m_configKeyToEntry(m_parent ? nullptr : new QHash<QString, const ConfigEntry *>())
 {
 }
 
 KateConfig::~KateConfig()
 {
+}
+
+void KateConfig::addConfigEntry(ConfigEntry &&entry)
+{
+    /**
+     * shall only be called for toplevel config
+     */
+    Q_ASSERT(isGlobal());
+
+    /**
+     * there shall be no gaps in the entries
+     * we might later want to use a vector
+     */
+    Q_ASSERT(m_configEntries.size() == static_cast<size_t>(entry.enumKey));
+
+    /**
+     * add new element
+     */
+    m_configEntries.emplace(entry.enumKey, entry);
+}
+
+void KateConfig::finalizeConfigEntries()
+{
+    /**
+     * shall only be called for toplevel config
+     */
+    Q_ASSERT(isGlobal());
+
+    /**
+     * compute list of all config keys + register map from key => config entry
+     *
+     * we skip entries without a command name, these config entries are not exposed ATM
+     *
+     */
+    for (const auto &entry : m_configEntries) {
+        if (!entry.second.commandName.isEmpty()) {
+            m_configKeys->append(entry.second.commandName);
+            m_configKeyToEntry->insert(entry.second.commandName, &entry.second);
+        }
+    }
+}
+
+void KateConfig::readConfigEntries(const KConfigGroup &config)
+{
+    configStart();
+
+    // read all config entries, even the ones ATM not set in this config object but known in the toplevel one
+    for (const auto &entry : fullConfigEntries()) {
+        setValue(entry.second.enumKey, config.readEntry(entry.second.configKey, entry.second.defaultValue));
+    }
+
+    configEnd();
+}
+
+void KateConfig::writeConfigEntries(KConfigGroup &config) const
+{
+    // write all config entries, even the ones ATM not set in this config object but known in the toplevel one
+    for (const auto &entry : fullConfigEntries()) {
+        config.writeEntry(entry.second.configKey, value(entry.second.enumKey));
+    }
 }
 
 void KateConfig::configStart()
@@ -72,6 +135,100 @@ void KateConfig::configEnd()
 
     updateConfig();
 }
+
+QVariant KateConfig::value(const int key) const
+{
+    // first: local lookup
+    const auto it = m_configEntries.find(key);
+    if (it != m_configEntries.end()) {
+        return it->second.value;
+    }
+
+    // else: fallback to parent config, if any
+    if (m_parent) {
+        return m_parent->value(key);
+    }
+
+    // if we arrive here, the key was invalid! => programming error
+    // for release builds, we just return invalid variant
+    Q_ASSERT(false);
+    return QVariant();
+}
+
+bool KateConfig::setValue(const int key, const QVariant &value)
+{
+    // check: is this key known at all?
+    const auto &knownEntries = fullConfigEntries();
+    const auto knownIt = knownEntries.find(key);
+    if (knownIt == knownEntries.end()) {
+        // if we arrive here, the key was invalid! => programming error
+        // for release builds, we just fail to set the value
+        Q_ASSERT(false);
+        return false;
+    }
+
+    // validator set? use it, if not accepting, abort setting
+    if (knownIt->second.validator && !knownIt->second.validator(value)) {
+        return false;
+    }
+
+    // check if value already there for this config
+    auto valueIt = m_configEntries.find(key);
+    if (valueIt != m_configEntries.end()) {
+        // skip any work if value is equal
+        if (valueIt->second.value == value) {
+            return true;
+        }
+
+        // else: alter value and be done
+        configStart();
+        valueIt->second.value = value;
+        configEnd();
+        return true;
+    }
+
+    // if not in this hash, we must copy the known entry and adjust the value
+    configStart();
+    auto res = m_configEntries.emplace(key, knownIt->second);
+    res.first->second.value = value;
+    configEnd();
+    return true;
+}
+
+QVariant KateConfig::value(const QString &key) const
+{
+    /**
+     * check if we know this key, if not, return invalid variant
+     */
+    const auto &knownEntries = fullConfigKeyToEntry();
+    const auto it = knownEntries.find(key);
+    if (it == knownEntries.end()) {
+        return QVariant();
+    }
+
+    /**
+     * key known, dispatch to normal value() function with enum
+     */
+    return value(it.value()->enumKey);
+}
+
+bool KateConfig::setValue(const QString &key, const QVariant &value)
+{
+    /**
+     * check if we know this key, if not, ignore the set
+     */
+    const auto &knownEntries = fullConfigKeyToEntry();
+    const auto it = knownEntries.find(key);
+    if (it == knownEntries.end()) {
+        return false;
+    }
+
+    /**
+     * key known, dispatch to normal setValue() function with enum
+     */
+    return setValue(it.value()->enumKey, value);
+}
+
 //END
 
 //BEGIN KateDocumentConfig
@@ -80,349 +237,208 @@ KateDocumentConfig *KateDocumentConfig::s_global = nullptr;
 KateViewConfig *KateViewConfig::s_global = nullptr;
 KateRendererConfig *KateRendererConfig::s_global = nullptr;
 
+/**
+ * validate if an encoding is ok
+ * @param name encoding name
+ * @return encoding ok?
+ */
+static bool isEncodingOk(const QString &name)
+{
+    bool found = false;
+    auto codec = KCharsets::charsets()->codecForName(name, found);
+    return found && codec;
+}
+
 KateGlobalConfig::KateGlobalConfig()
 {
+    /**
+     * register this as our global instance
+     */
+    Q_ASSERT(isGlobal());
     s_global = this;
 
-    // init with defaults from config or really hardcoded ones
-    KConfigGroup cg(KTextEditor::EditorPrivate::config(), "Editor");
+    /**
+     * init all known config entries
+     */
+    addConfigEntry(ConfigEntry(EncodingProberType, "Encoding Prober Type", QString(), KEncodingProber::Universal));
+    addConfigEntry(ConfigEntry(FallbackEncoding, "Fallback Encoding", QString(), QStringLiteral("ISO 8859-15"), [](const QVariant &value) { return isEncodingOk(value.toString()); }));
+
+    /**
+     * finalize the entries, e.g. hashs them
+     */
+    finalizeConfigEntries();
+
+    /**
+     * init with defaults from config or really hardcoded ones
+     */
+    KConfigGroup cg(KTextEditor::EditorPrivate::config(), "KTextEditor Editor");
     readConfig(cg);
-}
-
-KateGlobalConfig::~KateGlobalConfig()
-{
-}
-
-namespace
-{
-const char KEY_PROBER_TYPE[] = "Encoding Prober Type";
-const char KEY_FALLBACK_ENCODING[] = "Fallback Encoding";
 }
 
 void KateGlobalConfig::readConfig(const KConfigGroup &config)
 {
+    /**
+     * start config update group
+     */
     configStart();
 
-    setProberType((KEncodingProber::ProberType)config.readEntry(KEY_PROBER_TYPE, (int)KEncodingProber::Universal));
-    setFallbackEncoding(config.readEntry(KEY_FALLBACK_ENCODING, ""));
+    /**
+     * read generic entries
+     */
+    readConfigEntries(config);
 
+    /**
+     * end config update group, might trigger updateConfig()
+     */
     configEnd();
 }
 
 void KateGlobalConfig::writeConfig(KConfigGroup &config)
 {
-    config.writeEntry(KEY_PROBER_TYPE, (int)proberType());
-    config.writeEntry(KEY_FALLBACK_ENCODING, fallbackEncoding());
+    /**
+     * write generic entries
+     */
+    writeConfigEntries(config);
 }
 
 void KateGlobalConfig::updateConfig()
 {
     // write config
-    KConfigGroup cg(KTextEditor::EditorPrivate::config(), "Editor");
+    KConfigGroup cg(KTextEditor::EditorPrivate::config(), "KTextEditor Editor");
     writeConfig(cg);
     KTextEditor::EditorPrivate::config()->sync();
 }
 
-void KateGlobalConfig::setProberType(KEncodingProber::ProberType proberType)
-{
-    configStart();
-    m_proberType = proberType;
-    configEnd();
-}
-
-const QString &KateGlobalConfig::fallbackEncoding() const
-{
-    return m_fallbackEncoding;
-}
-
 QTextCodec *KateGlobalConfig::fallbackCodec() const
 {
-    if (m_fallbackEncoding.isEmpty()) {
+    /**
+     * query stored encoding, always fallback to ISO 8859-15 if nothing valid set
+     */
+    const auto encoding = value(FallbackEncoding).toString();
+    if (encoding.isEmpty()) {
         return QTextCodec::codecForName("ISO 8859-15");
     }
 
-    return KCharsets::charsets()->codecForName(m_fallbackEncoding);
-}
-
-bool KateGlobalConfig::setFallbackEncoding(const QString &encoding)
-{
-    QTextCodec *codec;
-    bool found = false;
-    if (encoding.isEmpty()) {
-        codec = s_global->fallbackCodec();
-        found = true;
-    } else {
-        codec = KCharsets::charsets()->codecForName(encoding, found);
-    }
-
-    if (!found || !codec) {
-        return false;
-    }
-
-    configStart();
-    m_fallbackEncoding = QString::fromLatin1(codec->name());
-    configEnd();
-    return true;
+    /**
+     * use configured encoding
+     */
+    return KCharsets::charsets()->codecForName(encoding);
 }
 
 KateDocumentConfig::KateDocumentConfig()
-    : m_tabWidthSet(false),
-      m_indentationWidthSet(false),
-      m_indentationModeSet(false),
-      m_wordWrapSet(false),
-      m_wordWrapAtSet(false),
-      m_pageUpDownMovesCursorSet(false),
-      m_keepExtraSpacesSet(false),
-      m_indentPastedTextSet(false),
-      m_backspaceIndentsSet(false),
-      m_smartHomeSet(false),
-      m_showTabsSet(false),
-      m_showSpacesSet(false),
-
-      m_replaceTabsDynSet(false),
-      m_removeSpacesSet(false),
-      m_newLineAtEofSet(false),
-      m_overwiteModeSet(false),
-      m_tabIndentsSet(false),
-      m_encodingSet(false),
-      m_eolSet(false),
-      m_bomSet(false),
-      m_allowEolDetectionSet(false),
-      m_backupFlagsSet(false),
-      m_backupPrefixSet(false),
-      m_backupSuffixSet(false),
-      m_swapFileModeSet(false),
-      m_swapDirectorySet(false),
-      m_swapSyncIntervalSet(false),
-      m_onTheFlySpellCheckSet(false),
-      m_lineLengthLimitSet(false)
-
 {
+    /**
+     * register this as our global instance
+     */
+    Q_ASSERT(isGlobal());
     s_global = this;
 
-    // init with defaults from config or really hardcoded ones
-    KConfigGroup cg(KTextEditor::EditorPrivate::config(), "Document");
-    readConfig(cg);
-}
+    /**
+     * init all known config entries
+     */
+    addConfigEntry(ConfigEntry(TabWidth, "Tab Width", QStringLiteral("tab-width"), 4, [](const QVariant &value) { return value.toInt() >= 1; }));
+    addConfigEntry(ConfigEntry(IndentationWidth, "Indentation Width", QStringLiteral("indent-width"), 4, [](const QVariant &value) { return value.toInt() >= 1; }));
+    addConfigEntry(ConfigEntry(OnTheFlySpellCheck, "On-The-Fly Spellcheck", QStringLiteral("on-the-fly-spellcheck"), false));
+    addConfigEntry(ConfigEntry(IndentOnTextPaste, "Indent On Text Paste", QStringLiteral("indent-pasted-text"), false));
+    addConfigEntry(ConfigEntry(ReplaceTabsWithSpaces, "ReplaceTabsDyn", QStringLiteral("replace-tabs"), true));
+    addConfigEntry(ConfigEntry(BackupOnSaveLocal, "Backup Local", QStringLiteral("backup-on-save-local"), false));
+    addConfigEntry(ConfigEntry(BackupOnSaveRemote, "Backup Remote", QStringLiteral("backup-on-save-remote"), false));
+    addConfigEntry(ConfigEntry(BackupOnSavePrefix, "Backup Prefix", QStringLiteral("backup-on-save-prefix"), QString()));
+    addConfigEntry(ConfigEntry(BackupOnSaveSuffix, "Backup Suffix", QStringLiteral("backup-on-save-suffix"), QStringLiteral("~")));
+    addConfigEntry(ConfigEntry(IndentationMode, "Indentation Mode", QString(), QStringLiteral("normal")));
+    addConfigEntry(ConfigEntry(TabHandlingMode, "Tab Handling", QString(), KateDocumentConfig::tabSmart));
+    addConfigEntry(ConfigEntry(StaticWordWrap, "Word Wrap", QString(), false));
+    addConfigEntry(ConfigEntry(StaticWordWrapColumn, "Word Wrap Column", QString(), 80, [](const QVariant &value) { return value.toInt() >= 1; }));
+    addConfigEntry(ConfigEntry(PageUpDownMovesCursor, "PageUp/PageDown Moves Cursor", QString(), false));
+    addConfigEntry(ConfigEntry(SmartHome, "Smart Home", QString(), true));
+    addConfigEntry(ConfigEntry(ShowTabs, "Show Tabs", QString(), true));
+    addConfigEntry(ConfigEntry(IndentOnTab, "Indent On Tab", QString(), true));
+    addConfigEntry(ConfigEntry(KeepExtraSpaces, "Keep Extra Spaces", QString(), false));
+    addConfigEntry(ConfigEntry(BackspaceIndents, "Indent On Backspace", QString(), true));
+    addConfigEntry(ConfigEntry(ShowSpacesMode, "Show Spaces", QString(), KateDocumentConfig::None));
+    addConfigEntry(ConfigEntry(TrailingMarkerSize, "Trailing Marker Size", QString(), 1));
+    addConfigEntry(ConfigEntry(RemoveSpacesMode, "Remove Spaces", QString(), 0));
+    addConfigEntry(ConfigEntry(NewlineAtEOF, "Newline at End of File", QString(), true));
+    addConfigEntry(ConfigEntry(OverwriteMode, "Overwrite Mode", QString(), false));
+    addConfigEntry(ConfigEntry(Encoding, "Encoding", QString(), QStringLiteral("UTF-8"), [](const QVariant &value) { return isEncodingOk(value.toString()); }));
+    addConfigEntry(ConfigEntry(EndOfLine, "End of Line", QString(), 0));
+    addConfigEntry(ConfigEntry(AllowEndOfLineDetection, "Allow End of Line Detection", QString(), true));
+    addConfigEntry(ConfigEntry(ByteOrderMark, "BOM", QString(), false));
+    addConfigEntry(ConfigEntry(SwapFile, "Swap File Mode", QString(), KateDocumentConfig::EnableSwapFile));
+    addConfigEntry(ConfigEntry(SwapFileDirectory, "Swap Directory", QString(), QString()));
+    addConfigEntry(ConfigEntry(SwapFileSyncInterval, "Swap Sync Interval", QString(), 15));
+    addConfigEntry(ConfigEntry(LineLengthLimit, "Line Length Limit", QString(), 4096));
 
-KateDocumentConfig::KateDocumentConfig(const KConfigGroup &cg)
-    : m_indentationWidth(2),
-      m_tabWidth(4),
-      m_tabHandling(tabSmart),
-      m_configFlags(0),
-      m_wordWrapAt(80),
-      m_tabWidthSet(false),
-      m_indentationWidthSet(false),
-      m_indentationModeSet(false),
-      m_wordWrapSet(false),
-      m_wordWrapAtSet(false),
-      m_pageUpDownMovesCursorSet(false),
-      m_keepExtraSpacesSet(false),
-      m_indentPastedTextSet(false),
-      m_backspaceIndentsSet(false),
-      m_smartHomeSet(false),
-      m_showTabsSet(false),
-      m_showSpacesSet(false),
-      m_markerSize(1),
-      m_replaceTabsDynSet(false),
-      m_removeSpacesSet(false),
-      m_newLineAtEofSet(false),
-      m_overwiteModeSet(false),
-      m_tabIndentsSet(false),
-      m_encodingSet(false),
-      m_eolSet(false),
-      m_bomSet(false),
-      m_allowEolDetectionSet(false),
-      m_backupFlagsSet(false),
-      m_backupPrefixSet(false),
-      m_backupSuffixSet(false),
-      m_swapFileModeSet(false),
-      m_swapDirectorySet(false),
-      m_swapSyncIntervalSet(false),
-      m_onTheFlySpellCheckSet(false),
-      m_lineLengthLimitSet(false),
-      m_doc(nullptr)
-{
-    // init with defaults from config or really hardcoded ones
+    /**
+     * finalize the entries, e.g. hashs them
+     */
+    finalizeConfigEntries();
+
+    /**
+     * init with defaults from config or really hardcoded ones
+     */
+    KConfigGroup cg(KTextEditor::EditorPrivate::config(), "KTextEditor Document");
     readConfig(cg);
 }
 
 KateDocumentConfig::KateDocumentConfig(KTextEditor::DocumentPrivate *doc)
-    : m_tabHandling(tabSmart),
-      m_configFlags(0),
-      m_tabWidthSet(false),
-      m_indentationWidthSet(false),
-      m_indentationModeSet(false),
-      m_wordWrapSet(false),
-      m_wordWrapAtSet(false),
-      m_pageUpDownMovesCursorSet(false),
-      m_keepExtraSpacesSet(false),
-      m_indentPastedTextSet(false),
-      m_backspaceIndentsSet(false),
-      m_smartHomeSet(false),
-      m_showTabsSet(false),
-      m_showSpacesSet(false),
-      m_markerSize(1),
-      m_replaceTabsDynSet(false),
-      m_removeSpacesSet(false),
-      m_newLineAtEofSet(false),
-      m_overwiteModeSet(false),
-      m_tabIndentsSet(false),
-      m_encodingSet(false),
-      m_eolSet(false),
-      m_bomSet(false),
-      m_allowEolDetectionSet(false),
-      m_backupFlagsSet(false),
-      m_backupPrefixSet(false),
-      m_backupSuffixSet(false),
-      m_swapFileModeSet(false),
-      m_swapDirectorySet(false),
-      m_swapSyncIntervalSet(false),
-      m_onTheFlySpellCheckSet(false),
-      m_lineLengthLimitSet(false),
+    : KateConfig(s_global),
       m_doc(doc)
 {
-}
-
-KateDocumentConfig::~KateDocumentConfig()
-{
-}
-
-namespace
-{
-const char KEY_TAB_WIDTH[] = "Tab Width";
-const char KEY_INDENTATION_WIDTH[] = "Indentation Width";
-const char KEY_INDENTATION_MODE[] = "Indentation Mode";
-const char KEY_TAB_HANDLING[] = "Tab Handling";
-const char KEY_WORD_WRAP[] = "Word Wrap";
-const char KEY_WORD_WRAP_AT[] = "Word Wrap Column";
-const char KEY_PAGEUP_DOWN_MOVES_CURSOR[] = "PageUp/PageDown Moves Cursor";
-const char KEY_SMART_HOME[] = "Smart Home";
-const char KEY_SHOW_TABS[] = "Show Tabs";
-const char KEY_TAB_INDENTS[] = "Indent On Tab";
-const char KEY_KEEP_EXTRA_SPACES[] = "Keep Extra Spaces";
-const char KEY_INDENT_PASTED_TEXT[] = "Indent On Text Paste";
-const char KEY_BACKSPACE_INDENTS[] = "Indent On Backspace";
-const char KEY_SHOW_SPACES[] = "Show Spaces";
-const char KEY_MARKER_SIZE[] = "Trailing Marker Size";
-const char KEY_REPLACE_TABS_DYN[] = "ReplaceTabsDyn";
-const char KEY_REMOVE_SPACES[] = "Remove Spaces";
-const char KEY_NEWLINE_AT_EOF[] = "Newline at End of File";
-const char KEY_OVR[] = "Overwrite Mode";
-const char KEY_ENCODING[] = "Encoding";
-const char KEY_EOL[] = "End of Line";
-const char KEY_ALLOW_EOL_DETECTION[] = "Allow End of Line Detection";
-const char KEY_BOM[] = "BOM";
-const char KEY_BACKUP_FLAGS[] = "Backup Flags";
-const char KEY_BACKUP_PREFIX[] = "Backup Prefix";
-const char KEY_BACKUP_SUFFIX[] = "Backup Suffix";
-const char KEY_SWAP_FILE_MODE[] = "Swap File Mode";
-const char KEY_SWAP_DIRECTORY[] = "Swap Directory";
-const char KEY_SWAP_SYNC_INTERVAL[] = "Swap Sync Interval";
-const char KEY_ON_THE_FLY_SPELLCHECK[] = "On-The-Fly Spellcheck";
-const char KEY_LINE_LENGTH_LIMIT[] = "Line Length Limit";
+    /**
+     * per document config doesn't read stuff per default
+     */
 }
 
 void KateDocumentConfig::readConfig(const KConfigGroup &config)
 {
+    /**
+     * start config update group
+     */
     configStart();
 
-    setTabWidth(config.readEntry(KEY_TAB_WIDTH, 4));
+    /**
+     * read generic entries
+     */
+    readConfigEntries(config);
 
-    setIndentationWidth(config.readEntry(KEY_INDENTATION_WIDTH, 4));
+    /**
+     * fixup sonnet config, see KateSpellCheckConfigTab::apply(), too
+     * WARNING: this is slightly hackish, but it's currently the only way to
+     *          do it, see also the KTextEdit class
+     */
+    if (isGlobal()) {
+        const QSettings settings(QStringLiteral("KDE"), QStringLiteral("Sonnet"));
+        setOnTheFlySpellCheck(settings.value(QStringLiteral("checkerEnabledByDefault"), false).toBool());
+    }
 
-    setIndentationMode(config.readEntry(KEY_INDENTATION_MODE, "normal"));
+    /**
+     * backwards compatibility mappings
+     * convert stuff, old entries deleted in writeConfig
+     */
+    if (const int backupFlags = config.readEntry("Backup Flags", 0)) {
+        setBackupOnSaveLocal(backupFlags & 0x1);
+        setBackupOnSaveRemote(backupFlags & 0x2);
+    }
 
-    setTabHandling(config.readEntry(KEY_TAB_HANDLING, int(KateDocumentConfig::tabSmart)));
-
-    setWordWrap(config.readEntry(KEY_WORD_WRAP, false));
-    setWordWrapAt(config.readEntry(KEY_WORD_WRAP_AT, 80));
-    setPageUpDownMovesCursor(config.readEntry(KEY_PAGEUP_DOWN_MOVES_CURSOR, false));
-
-    setSmartHome(config.readEntry(KEY_SMART_HOME, true));
-    setShowTabs(config.readEntry(KEY_SHOW_TABS, true));
-    setTabIndents(config.readEntry(KEY_TAB_INDENTS, true));
-    setKeepExtraSpaces(config.readEntry(KEY_KEEP_EXTRA_SPACES, false));
-    setIndentPastedText(config.readEntry(KEY_INDENT_PASTED_TEXT, false));
-    setBackspaceIndents(config.readEntry(KEY_BACKSPACE_INDENTS, true));
-    setShowSpaces(config.readEntry(KEY_SHOW_SPACES, false));
-    setMarkerSize(config.readEntry(KEY_MARKER_SIZE, 1));
-    setReplaceTabsDyn(config.readEntry(KEY_REPLACE_TABS_DYN, true));
-    setRemoveSpaces(config.readEntry(KEY_REMOVE_SPACES, 0));
-    setNewLineAtEof(config.readEntry(KEY_NEWLINE_AT_EOF, true));
-    setOvr(config.readEntry(KEY_OVR, false));
-
-    setEncoding(config.readEntry(KEY_ENCODING, ""));
-
-    setEol(config.readEntry(KEY_EOL, 0));
-    setAllowEolDetection(config.readEntry(KEY_ALLOW_EOL_DETECTION, true));
-
-    setBom(config.readEntry(KEY_BOM, false));
-
-    setBackupFlags(config.readEntry(KEY_BACKUP_FLAGS, 0));
-
-    setBackupPrefix(config.readEntry(KEY_BACKUP_PREFIX, QString()));
-
-    setBackupSuffix(config.readEntry(KEY_BACKUP_SUFFIX, QStringLiteral("~")));
-
-    setSwapFileMode(config.readEntry(KEY_SWAP_FILE_MODE, (uint)EnableSwapFile));
-    setSwapDirectory(config.readEntry(KEY_SWAP_DIRECTORY, QString()));
-    setSwapSyncInterval(config.readEntry(KEY_SWAP_SYNC_INTERVAL, 15));
-
-    setOnTheFlySpellCheck(config.readEntry(KEY_ON_THE_FLY_SPELLCHECK, false));
-
-    setLineLengthLimit(config.readEntry(KEY_LINE_LENGTH_LIMIT, 4096));
-
+    /**
+     * end config update group, might trigger updateConfig()
+     */
     configEnd();
 }
 
 void KateDocumentConfig::writeConfig(KConfigGroup &config)
 {
-    config.writeEntry(KEY_TAB_WIDTH, tabWidth());
+    /**
+     * write generic entries
+     */
+    writeConfigEntries(config);
 
-    config.writeEntry(KEY_INDENTATION_WIDTH, indentationWidth());
-    config.writeEntry(KEY_INDENTATION_MODE, indentationMode());
-
-    config.writeEntry(KEY_TAB_HANDLING, tabHandling());
-
-    config.writeEntry(KEY_WORD_WRAP, wordWrap());
-    config.writeEntry(KEY_WORD_WRAP_AT, wordWrapAt());
-
-    config.writeEntry(KEY_PAGEUP_DOWN_MOVES_CURSOR, pageUpDownMovesCursor());
-
-    config.writeEntry(KEY_SMART_HOME, smartHome());
-    config.writeEntry(KEY_SHOW_TABS, showTabs());
-    config.writeEntry(KEY_TAB_INDENTS, tabIndentsEnabled());
-    config.writeEntry(KEY_KEEP_EXTRA_SPACES, keepExtraSpaces());
-    config.writeEntry(KEY_INDENT_PASTED_TEXT, indentPastedText());
-    config.writeEntry(KEY_BACKSPACE_INDENTS, backspaceIndents());
-    config.writeEntry(KEY_SHOW_SPACES, showSpaces());
-    config.writeEntry(KEY_MARKER_SIZE, markerSize());
-    config.writeEntry(KEY_REPLACE_TABS_DYN, replaceTabsDyn());
-    config.writeEntry(KEY_REMOVE_SPACES, removeSpaces());
-    config.writeEntry(KEY_NEWLINE_AT_EOF, newLineAtEof());
-    config.writeEntry(KEY_OVR, ovr());
-
-    config.writeEntry(KEY_ENCODING, encoding());
-
-    config.writeEntry(KEY_EOL, eol());
-    config.writeEntry(KEY_ALLOW_EOL_DETECTION, allowEolDetection());
-
-    config.writeEntry(KEY_BOM, bom());
-
-    config.writeEntry(KEY_BACKUP_FLAGS, backupFlags());
-
-    config.writeEntry(KEY_BACKUP_PREFIX, backupPrefix());
-
-    config.writeEntry(KEY_BACKUP_SUFFIX, backupSuffix());
-
-    config.writeEntry(KEY_SWAP_FILE_MODE, swapFileModeRaw());
-    config.writeEntry(KEY_SWAP_DIRECTORY, swapDirectory());
-    config.writeEntry(KEY_SWAP_SYNC_INTERVAL, swapSyncInterval());
-
-    config.writeEntry(KEY_ON_THE_FLY_SPELLCHECK, onTheFlySpellCheck());
-
-    config.writeEntry(KEY_LINE_LENGTH_LIMIT, lineLengthLimit());
+    /**
+     * backwards compatibility mappings
+     * here we remove old entries we converted on readConfig
+     */
+    config.deleteEntry("Backup Flags");
 }
 
 void KateDocumentConfig::updateConfig()
@@ -438,797 +454,47 @@ void KateDocumentConfig::updateConfig()
         }
 
         // write config
-        KConfigGroup cg(KTextEditor::EditorPrivate::config(), "Document");
+        KConfigGroup cg(KTextEditor::EditorPrivate::config(), "KTextEditor Document");
         writeConfig(cg);
         KTextEditor::EditorPrivate::config()->sync();
     }
 }
 
-int KateDocumentConfig::tabWidth() const
-{
-    if (m_tabWidthSet || isGlobal()) {
-        return m_tabWidth;
-    }
-
-    return s_global->tabWidth();
-}
-
-void KateDocumentConfig::setTabWidth(int tabWidth)
-{
-    if (tabWidth < 1) {
-        return;
-    }
-
-    if (m_tabWidthSet && m_tabWidth == tabWidth) {
-        return;
-    }
-
-    configStart();
-
-    m_tabWidthSet = true;
-    m_tabWidth = tabWidth;
-
-    configEnd();
-}
-
-int KateDocumentConfig::indentationWidth() const
-{
-    if (m_indentationWidthSet || isGlobal()) {
-        return m_indentationWidth;
-    }
-
-    return s_global->indentationWidth();
-}
-
-void KateDocumentConfig::setIndentationWidth(int indentationWidth)
-{
-    if (indentationWidth < 1) {
-        return;
-    }
-
-    if (m_indentationWidthSet && m_indentationWidth == indentationWidth) {
-        return;
-    }
-
-    configStart();
-
-    m_indentationWidthSet = true;
-    m_indentationWidth = indentationWidth;
-
-    configEnd();
-}
-
-const QString &KateDocumentConfig::indentationMode() const
-{
-    if (m_indentationModeSet || isGlobal()) {
-        return m_indentationMode;
-    }
-
-    return s_global->indentationMode();
-}
-
-void KateDocumentConfig::setIndentationMode(const QString &indentationMode)
-{
-    if (m_indentationModeSet && m_indentationMode == indentationMode) {
-        return;
-    }
-
-    configStart();
-
-    m_indentationModeSet = true;
-    m_indentationMode = indentationMode;
-
-    configEnd();
-}
-
-uint KateDocumentConfig::tabHandling() const
-{
-    // This setting is purly a user preference,
-    // hence, there exists only the global setting.
-    if (isGlobal()) {
-        return m_tabHandling;
-    }
-
-    return s_global->tabHandling();
-}
-
-void KateDocumentConfig::setTabHandling(uint tabHandling)
-{
-    configStart();
-
-    m_tabHandling = tabHandling;
-
-    configEnd();
-}
-
-bool KateDocumentConfig::wordWrap() const
-{
-    if (m_wordWrapSet || isGlobal()) {
-        return m_wordWrap;
-    }
-
-    return s_global->wordWrap();
-}
-
-void KateDocumentConfig::setWordWrap(bool on)
-{
-    if (m_wordWrapSet && m_wordWrap == on) {
-        return;
-    }
-
-    configStart();
-
-    m_wordWrapSet = true;
-    m_wordWrap = on;
-
-    configEnd();
-}
-
-int KateDocumentConfig::wordWrapAt() const
-{
-    if (m_wordWrapAtSet || isGlobal()) {
-        return m_wordWrapAt;
-    }
-
-    return s_global->wordWrapAt();
-}
-
-void KateDocumentConfig::setWordWrapAt(int col)
-{
-    if (col < 1) {
-        return;
-    }
-
-    if (m_wordWrapAtSet && m_wordWrapAt == col) {
-        return;
-    }
-
-    configStart();
-
-    m_wordWrapAtSet = true;
-    m_wordWrapAt = col;
-
-    configEnd();
-}
-
-bool KateDocumentConfig::pageUpDownMovesCursor() const
-{
-    if (m_pageUpDownMovesCursorSet || isGlobal()) {
-        return m_pageUpDownMovesCursor;
-    }
-
-    return s_global->pageUpDownMovesCursor();
-}
-
-void KateDocumentConfig::setPageUpDownMovesCursor(bool on)
-{
-    if (m_pageUpDownMovesCursorSet && m_pageUpDownMovesCursor == on) {
-        return;
-    }
-
-    configStart();
-
-    m_pageUpDownMovesCursorSet = true;
-    m_pageUpDownMovesCursor = on;
-
-    configEnd();
-}
-
-void KateDocumentConfig::setKeepExtraSpaces(bool on)
-{
-    if (m_keepExtraSpacesSet && m_keepExtraSpaces == on) {
-        return;
-    }
-
-    configStart();
-
-    m_keepExtraSpacesSet = true;
-    m_keepExtraSpaces = on;
-
-    configEnd();
-}
-
-bool KateDocumentConfig::keepExtraSpaces() const
-{
-    if (m_keepExtraSpacesSet || isGlobal()) {
-        return m_keepExtraSpaces;
-    }
-
-    return s_global->keepExtraSpaces();
-}
-
-void KateDocumentConfig::setIndentPastedText(bool on)
-{
-    if (m_indentPastedTextSet && m_indentPastedText == on) {
-        return;
-    }
-
-    configStart();
-
-    m_indentPastedTextSet = true;
-    m_indentPastedText = on;
-
-    configEnd();
-}
-
-bool KateDocumentConfig::indentPastedText() const
-{
-    if (m_indentPastedTextSet || isGlobal()) {
-        return m_indentPastedText;
-    }
-
-    return s_global->indentPastedText();
-}
-
-void KateDocumentConfig::setBackspaceIndents(bool on)
-{
-    if (m_backspaceIndentsSet && m_backspaceIndents == on) {
-        return;
-    }
-
-    configStart();
-
-    m_backspaceIndentsSet = true;
-    m_backspaceIndents = on;
-
-    configEnd();
-}
-
-bool KateDocumentConfig::backspaceIndents() const
-{
-    if (m_backspaceIndentsSet || isGlobal()) {
-        return m_backspaceIndents;
-    }
-
-    return s_global->backspaceIndents();
-}
-
-void KateDocumentConfig::setSmartHome(bool on)
-{
-    if (m_smartHomeSet && m_smartHome == on) {
-        return;
-    }
-
-    configStart();
-
-    m_smartHomeSet = true;
-    m_smartHome = on;
-
-    configEnd();
-}
-
-bool KateDocumentConfig::smartHome() const
-{
-    if (m_smartHomeSet || isGlobal()) {
-        return m_smartHome;
-    }
-
-    return s_global->smartHome();
-}
-
-void KateDocumentConfig::setShowTabs(bool on)
-{
-    if (m_showTabsSet && m_showTabs == on) {
-        return;
-    }
-
-    configStart();
-
-    m_showTabsSet = true;
-    m_showTabs = on;
-
-    configEnd();
-}
-
-bool KateDocumentConfig::showTabs() const
-{
-    if (m_showTabsSet || isGlobal()) {
-        return m_showTabs;
-    }
-
-    return s_global->showTabs();
-}
-
-void KateDocumentConfig::setShowSpaces(bool on)
-{
-    if (m_showSpacesSet && m_showSpaces == on) {
-        return;
-    }
-
-    configStart();
-
-    m_showSpacesSet = true;
-    m_showSpaces = on;
-
-    configEnd();
-}
-
-bool KateDocumentConfig::showSpaces() const
-{
-    if (m_showSpacesSet || isGlobal()) {
-        return m_showSpaces;
-    }
-
-    return s_global->showSpaces();
-}
-
-void KateDocumentConfig::setMarkerSize(uint markerSize)
-{
-    if (m_markerSize == markerSize) {
-        return;
-    }
-
-    configStart();
-
-    m_markerSize = markerSize;
-
-    configEnd();
-}
-
-uint KateDocumentConfig::markerSize() const
-{
-    if (isGlobal()) {
-        return m_markerSize;
-    }
-
-    return s_global->markerSize();
-}
-
-void KateDocumentConfig::setReplaceTabsDyn(bool on)
-{
-    if (m_replaceTabsDynSet && m_replaceTabsDyn == on) {
-        return;
-    }
-
-    configStart();
-
-    m_replaceTabsDynSet = true;
-    m_replaceTabsDyn = on;
-
-    configEnd();
-}
-
-bool KateDocumentConfig::replaceTabsDyn() const
-{
-    if (m_replaceTabsDynSet || isGlobal()) {
-        return m_replaceTabsDyn;
-    }
-
-    return s_global->replaceTabsDyn();
-}
-
-void KateDocumentConfig::setRemoveSpaces(int triState)
-{
-    if (m_removeSpacesSet && m_removeSpaces == triState) {
-        return;
-    }
-
-    configStart();
-
-    m_removeSpacesSet = true;
-    m_removeSpaces = triState;
-
-    configEnd();
-}
-
-int KateDocumentConfig::removeSpaces() const
-{
-    if (m_removeSpacesSet || isGlobal()) {
-        return m_removeSpaces;
-    }
-
-    return s_global->removeSpaces();
-}
-
-void KateDocumentConfig::setNewLineAtEof(bool on)
-{
-    if (m_newLineAtEofSet && m_newLineAtEof == on) {
-        return;
-    }
-
-    configStart();
-
-    m_newLineAtEofSet = true;
-    m_newLineAtEof = on;
-
-    configEnd();
-}
-
-bool KateDocumentConfig::newLineAtEof() const
-{
-    if (m_newLineAtEofSet || isGlobal()) {
-        return m_newLineAtEof;
-    }
-
-    return s_global->newLineAtEof();
-}
-
-void KateDocumentConfig::setOvr(bool on)
-{
-    if (m_overwiteModeSet && m_overwiteMode == on) {
-        return;
-    }
-
-    configStart();
-
-    m_overwiteModeSet = true;
-    m_overwiteMode = on;
-
-    configEnd();
-}
-
-bool KateDocumentConfig::ovr() const
-{
-    if (m_overwiteModeSet || isGlobal()) {
-        return m_overwiteMode;
-    }
-
-    return s_global->ovr();
-}
-
-void KateDocumentConfig::setTabIndents(bool on)
-{
-    if (m_tabIndentsSet && m_tabIndents == on) {
-        return;
-    }
-
-    configStart();
-
-    m_tabIndentsSet = true;
-    m_tabIndents = on;
-
-    configEnd();
-}
-
-bool KateDocumentConfig::tabIndentsEnabled() const
-{
-    if (m_tabIndentsSet || isGlobal()) {
-        return m_tabIndents;
-    }
-
-    return s_global->tabIndentsEnabled();
-}
-
-const QString &KateDocumentConfig::encoding() const
-{
-    if (m_encodingSet || isGlobal()) {
-        return m_encoding;
-    }
-
-    return s_global->encoding();
-}
-
 QTextCodec *KateDocumentConfig::codec() const
 {
-    if (m_encodingSet || isGlobal()) {
-        if (m_encoding.isEmpty() && isGlobal()) {
-            // default to UTF-8, this makes sense to have a usable encoding detection
-            // else for people that have by bad luck some encoding like latin1 as default, no encoding detection will work
-            // see e.g. bug 362604 for windows
-            return QTextCodec::codecForName("UTF-8");
-        } else if (m_encoding.isEmpty()) {
-            return s_global->codec();
-        } else {
-            return KCharsets::charsets()->codecForName(m_encoding);
-        }
-    }
-
-    return s_global->codec();
-}
-
-bool KateDocumentConfig::setEncoding(const QString &encoding)
-{
-    QTextCodec *codec;
-    bool found = false;
+    /**
+     * query stored encoding, always fallback to UTF-8 if nothing valid set
+     */
+    const auto encoding = value(Encoding).toString();
     if (encoding.isEmpty()) {
-        codec = s_global->codec();
-        found = true;
-    } else {
-        codec = KCharsets::charsets()->codecForName(encoding, found);
+        return QTextCodec::codecForName("UTF-8");
     }
 
-    if (!found || !codec) {
-        return false;
-    }
-
-    configStart();
-    m_encodingSet = true;
-    m_encoding = QString::fromLatin1(codec->name());
-    configEnd();
-    return true;
-}
-
-bool KateDocumentConfig::isSetEncoding() const
-{
-    return m_encodingSet;
-}
-
-int KateDocumentConfig::eol() const
-{
-    if (m_eolSet || isGlobal()) {
-        return m_eol;
-    }
-
-    return s_global->eol();
+    /**
+     * use configured encoding
+     */
+    return KCharsets::charsets()->codecForName(encoding);
 }
 
 QString KateDocumentConfig::eolString()
 {
-    if (eol() == KateDocumentConfig::eolUnix) {
-        return QStringLiteral("\n");
-    } else if (eol() == KateDocumentConfig::eolDos) {
-        return QStringLiteral("\r\n");
-    } else if (eol() == KateDocumentConfig::eolMac) {
-        return QStringLiteral("\r");
+    switch(eol()) {
+        case KateDocumentConfig::eolDos:
+            return QStringLiteral("\r\n");
+
+        case KateDocumentConfig::eolMac:
+            return QStringLiteral("\r");
+
+        default:
+            return QStringLiteral("\n");
     }
-
-    return QStringLiteral("\n");
 }
-
-void KateDocumentConfig::setEol(int mode)
-{
-    if (m_eolSet && m_eol == mode) {
-        return;
-    }
-
-    configStart();
-
-    m_eolSet = true;
-    m_eol = mode;
-
-    configEnd();
-}
-
-void KateDocumentConfig::setBom(bool bom)
-{
-    if (m_bomSet && m_bom == bom) {
-        return;
-    }
-
-    configStart();
-
-    m_bomSet = true;
-    m_bom = bom;
-
-    configEnd();
-}
-
-bool KateDocumentConfig::bom() const
-{
-    if (m_bomSet || isGlobal()) {
-        return m_bom;
-    }
-
-    return s_global->bom();
-}
-
-bool KateDocumentConfig::allowEolDetection() const
-{
-    if (m_allowEolDetectionSet || isGlobal()) {
-        return m_allowEolDetection;
-    }
-
-    return s_global->allowEolDetection();
-}
-
-void KateDocumentConfig::setAllowEolDetection(bool on)
-{
-    if (m_allowEolDetectionSet && m_allowEolDetection == on) {
-        return;
-    }
-
-    configStart();
-
-    m_allowEolDetectionSet = true;
-    m_allowEolDetection = on;
-
-    configEnd();
-}
-
-uint KateDocumentConfig::backupFlags() const
-{
-    if (m_backupFlagsSet || isGlobal()) {
-        return m_backupFlags;
-    }
-
-    return s_global->backupFlags();
-}
-
-void KateDocumentConfig::setBackupFlags(uint flags)
-{
-    if (m_backupFlagsSet && m_backupFlags == flags) {
-        return;
-    }
-
-    configStart();
-
-    m_backupFlagsSet = true;
-    m_backupFlags = flags;
-
-    configEnd();
-}
-
-const QString &KateDocumentConfig::backupPrefix() const
-{
-    if (m_backupPrefixSet || isGlobal()) {
-        return m_backupPrefix;
-    }
-
-    return s_global->backupPrefix();
-}
-
-const QString &KateDocumentConfig::backupSuffix() const
-{
-    if (m_backupSuffixSet || isGlobal()) {
-        return m_backupSuffix;
-    }
-
-    return s_global->backupSuffix();
-}
-
-void KateDocumentConfig::setBackupPrefix(const QString &prefix)
-{
-    if (m_backupPrefixSet && m_backupPrefix == prefix) {
-        return;
-    }
-
-    configStart();
-
-    m_backupPrefixSet = true;
-    m_backupPrefix = prefix;
-
-    configEnd();
-}
-
-void KateDocumentConfig::setBackupSuffix(const QString &suffix)
-{
-    if (m_backupSuffixSet && m_backupSuffix == suffix) {
-        return;
-    }
-
-    configStart();
-
-    m_backupSuffixSet = true;
-    m_backupSuffix = suffix;
-
-    configEnd();
-}
-
-uint KateDocumentConfig::swapSyncInterval() const
-{
-    if (m_swapSyncIntervalSet || isGlobal()) {
-        return m_swapSyncInterval;
-    }
-
-    return s_global->swapSyncInterval();
-}
-
-void KateDocumentConfig::setSwapSyncInterval(uint interval)
-{
-    if (m_swapSyncIntervalSet && m_swapSyncInterval == interval) {
-        return;
-    }
-
-    configStart();
-
-    m_swapSyncIntervalSet = true;
-    m_swapSyncInterval = interval;
-
-    configEnd();
-}
-
-uint KateDocumentConfig::swapFileModeRaw() const
-{
-    if (m_swapFileModeSet || isGlobal()) {
-        return m_swapFileMode;
-    }
-
-    return s_global->swapFileModeRaw();
-}
-
-KateDocumentConfig::SwapFileMode KateDocumentConfig::swapFileMode() const
-{
-    return static_cast<KateDocumentConfig::SwapFileMode>(swapFileModeRaw());
-}
-
-void KateDocumentConfig::setSwapFileMode(uint mode)
-{
-    if (m_swapFileModeSet && m_swapFileMode == mode) {
-        return;
-    }
-
-    configStart();
-
-    m_swapFileModeSet = true;
-    m_swapFileMode = mode;
-
-    configEnd();
-}
-
-const QString &KateDocumentConfig::swapDirectory() const
-{
-    if (m_swapDirectorySet || isGlobal()) {
-        return m_swapDirectory;
-    }
-
-    return s_global->swapDirectory();
-}
-
-void KateDocumentConfig::setSwapDirectory(const QString &directory)
-{
-    if (m_swapDirectorySet && m_swapDirectory == directory) {
-        return;
-    }
-
-    configStart();
-
-    m_swapDirectorySet = true;
-    m_swapDirectory = directory;
-
-    configEnd();
-}
-
-bool KateDocumentConfig::onTheFlySpellCheck() const
-{
-    if (isGlobal()) {
-        // WARNING: this is slightly hackish, but it's currently the only way to
-        //          do it, see also the KTextEdit class
-        QSettings settings(QStringLiteral("KDE"), QStringLiteral("Sonnet"));
-        return settings.value(QStringLiteral("checkerEnabledByDefault"), false).toBool();
-        //KConfigGroup configGroup(KSharedConfig::openConfig(), "Spelling");
-        //return configGroup.readEntry("checkerEnabledByDefault", false);
-    }
-    if (m_onTheFlySpellCheckSet) {
-        return m_onTheFlySpellCheck;
-    }
-
-    return s_global->onTheFlySpellCheck();
-}
-
-void KateDocumentConfig::setOnTheFlySpellCheck(bool on)
-{
-    if (m_onTheFlySpellCheckSet && m_onTheFlySpellCheck == on) {
-        return;
-    }
-
-    configStart();
-
-    m_onTheFlySpellCheckSet = true;
-    m_onTheFlySpellCheck = on;
-
-    configEnd();
-}
-
-int KateDocumentConfig::lineLengthLimit() const
-{
-    if (m_lineLengthLimitSet || isGlobal()) {
-        return m_lineLengthLimit;
-    }
-
-    return s_global->lineLengthLimit();
-}
-
-void KateDocumentConfig::setLineLengthLimit(int lineLengthLimit)
-{
-    if (m_lineLengthLimitSet && m_lineLengthLimit == lineLengthLimit) {
-        return;
-    }
-
-    configStart();
-
-    m_lineLengthLimitSet = true;
-    m_lineLengthLimit = lineLengthLimit;
-
-    configEnd();
-}
-
 //END
 
 //BEGIN KateViewConfig
 KateViewConfig::KateViewConfig()
-    :
-
-    m_dynWordWrapSet(false),
+    : m_dynWordWrapSet(false),
+    m_dynWrapAtStaticMarkerSet(false),
     m_dynWordWrapIndicatorsSet(false),
     m_dynWordWrapAlignIndentSet(false),
     m_lineNumbersSet(false),
@@ -1255,12 +521,13 @@ KateViewConfig::KateViewConfig()
     m_keywordCompletionSet(false),
     m_wordCompletionMinimalWordLengthSet(false),
     m_smartCopyCutSet(false),
+    m_mousePasteAtCursorPositionSet(false),
     m_scrollPastEndSet(false),
     m_allowMarkMenu(true),
     m_wordCompletionRemoveTailSet(false),
-    m_foldFirstLineSet (false),
+    m_foldFirstLineSet(false),
     m_showWordCountSet(false),
-    m_showLinesCountSet(false),
+    m_showLineCountSet(false),
     m_autoBracketsSet(false),
     m_backspaceRemoveComposedSet(false)
 
@@ -1268,16 +535,17 @@ KateViewConfig::KateViewConfig()
     s_global = this;
 
     // init with defaults from config or really hardcoded ones
-    KConfigGroup config(KTextEditor::EditorPrivate::config(), "View");
+    KConfigGroup config(KTextEditor::EditorPrivate::config(), "KTextEditor View");
     readConfig(config);
 }
 
 KateViewConfig::KateViewConfig(KTextEditor::ViewPrivate *view)
-    :
+    : KateConfig(s_global),
     m_searchFlags(PowerModePlainText),
     m_maxHistorySize(100),
     m_showWordCount(false),
     m_dynWordWrapSet(false),
+    m_dynWrapAtStaticMarkerSet(false),
     m_dynWordWrapIndicatorsSet(false),
     m_dynWordWrapAlignIndentSet(false),
     m_lineNumbersSet(false),
@@ -1304,10 +572,13 @@ KateViewConfig::KateViewConfig(KTextEditor::ViewPrivate *view)
     m_keywordCompletionSet(false),
     m_wordCompletionMinimalWordLengthSet(false),
     m_smartCopyCutSet(false),
+    m_mousePasteAtCursorPositionSet(false),
     m_scrollPastEndSet(false),
     m_allowMarkMenu(true),
     m_wordCompletionRemoveTailSet(false),
     m_foldFirstLineSet(false),
+    m_showWordCountSet(false),
+    m_showLineCountSet(false),
     m_autoBracketsSet(false),
     m_backspaceRemoveComposedSet(false),
     m_view(view)
@@ -1322,6 +593,7 @@ namespace
 {
 const char KEY_SEARCH_REPLACE_FLAGS[] = "Search/Replace Flags";
 const char KEY_DYN_WORD_WRAP[] = "Dynamic Word Wrap";
+const char KEY_DYN_WORD_WRAP_AT_STATIC_MARKER[] = "Dynamic Word Wrap At Static Marker";
 const char KEY_DYN_WORD_WRAP_INDICATORS[] = "Dynamic Word Wrap Indicators";
 const char KEY_DYN_WORD_WRAP_ALIGN_INDENT[] = "Dynamic Word Wrap Align Indent";
 const char KEY_LINE_NUMBERS[] = "Line Numbers";
@@ -1351,9 +623,10 @@ const char KEY_KEYWORD_COMPLETION[] = "Keyword Completion";
 const char KEY_WORD_COMPLETION_MINIMAL_WORD_LENGTH[] = "Word Completion Minimal Word Length";
 const char KEY_WORD_COMPLETION_REMOVE_TAIL[] = "Word Completion Remove Tail";
 const char KEY_SMART_COPY_CUT[] = "Smart Copy Cut";
+const char KEY_MOUSE_PASTE_AT_CURSOR_POSITION[] = "Mouse Paste At Cursor Position";
 const char KEY_SCROLL_PAST_END[] = "Scroll Past End";
 const char KEY_FOLD_FIRST_LINE[] = "Fold First Line";
-const char KEY_SHOW_LINES_COUNT[] = "Show Lines Count";
+const char KEY_SHOW_LINE_COUNT[] = "Show Line Count";
 const char KEY_SHOW_WORD_COUNT[] = "Show Word Count";
 const char KEY_AUTO_BRACKETS[] = "Auto Brackets";
 const char KEY_BACKSPACE_REMOVE_COMPOSED[] = "Backspace Remove Composed Characters";
@@ -1363,8 +636,12 @@ void KateViewConfig::readConfig(const KConfigGroup &config)
 {
     configStart();
 
+    // read generic entries
+    readConfigEntries(config);
+
     // default on
     setDynWordWrap(config.readEntry(KEY_DYN_WORD_WRAP, true));
+    setDynWrapAtStaticMarker(config.readEntry(KEY_DYN_WORD_WRAP_AT_STATIC_MARKER, false));
     setDynWordWrapIndicators(config.readEntry(KEY_DYN_WORD_WRAP_INDICATORS, 1));
     setDynWordWrapAlignIndent(config.readEntry(KEY_DYN_WORD_WRAP_ALIGN_INDENT, 80));
 
@@ -1415,9 +692,10 @@ void KateViewConfig::readConfig(const KConfigGroup &config)
     setWordCompletionMinimalWordLength(config.readEntry(KEY_WORD_COMPLETION_MINIMAL_WORD_LENGTH, 3));
     setWordCompletionRemoveTail(config.readEntry(KEY_WORD_COMPLETION_REMOVE_TAIL, true));
     setSmartCopyCut(config.readEntry(KEY_SMART_COPY_CUT, false));
+    setMousePasteAtCursorPosition(config.readEntry(KEY_MOUSE_PASTE_AT_CURSOR_POSITION, false));
     setScrollPastEnd(config.readEntry(KEY_SCROLL_PAST_END, false));
     setFoldFirstLine(config.readEntry(KEY_FOLD_FIRST_LINE, false));
-    setShowLinesCount(config.readEntry(KEY_SHOW_LINES_COUNT, false));
+    setShowLineCount(config.readEntry(KEY_SHOW_LINE_COUNT, false));
     setShowWordCount(config.readEntry(KEY_SHOW_WORD_COUNT, false));
     setAutoBrackets(config.readEntry(KEY_AUTO_BRACKETS, false));
 
@@ -1428,7 +706,11 @@ void KateViewConfig::readConfig(const KConfigGroup &config)
 
 void KateViewConfig::writeConfig(KConfigGroup &config)
 {
+    // write generic entries
+    writeConfigEntries(config);
+
     config.writeEntry(KEY_DYN_WORD_WRAP, dynWordWrap());
+    config.writeEntry(KEY_DYN_WORD_WRAP_AT_STATIC_MARKER, dynWrapAtStaticMarker());
     config.writeEntry(KEY_DYN_WORD_WRAP_INDICATORS, dynWordWrapIndicators());
     config.writeEntry(KEY_DYN_WORD_WRAP_ALIGN_INDENT, dynWordWrapAlignIndent());
 
@@ -1476,6 +758,7 @@ void KateViewConfig::writeConfig(KConfigGroup &config)
     config.writeEntry(KEY_WORD_COMPLETION_REMOVE_TAIL, wordCompletionRemoveTail());
 
     config.writeEntry(KEY_SMART_COPY_CUT, smartCopyCut());
+    config.writeEntry(KEY_MOUSE_PASTE_AT_CURSOR_POSITION, mousePasteAtCursorPosition());
     config.writeEntry(KEY_SCROLL_PAST_END, scrollPastEnd());
     config.writeEntry(KEY_FOLD_FIRST_LINE, foldFirstLine());
 
@@ -1483,7 +766,7 @@ void KateViewConfig::writeConfig(KConfigGroup &config)
     config.writeEntry(KEY_VI_INPUT_MODE_STEAL_KEYS, viInputModeStealKeys());
     config.writeEntry(KEY_VI_RELATIVE_LINE_NUMBERS, viRelativeLineNumbers());
 
-    config.writeEntry(KEY_SHOW_LINES_COUNT, showLinesCount());
+    config.writeEntry(KEY_SHOW_LINE_COUNT, showLineCount());
     config.writeEntry(KEY_SHOW_WORD_COUNT, showWordCount());
     config.writeEntry(KEY_AUTO_BRACKETS, autoBrackets());
 
@@ -1503,7 +786,7 @@ void KateViewConfig::updateConfig()
         }
 
         // write config
-        KConfigGroup cg(KTextEditor::EditorPrivate::config(), "View");
+        KConfigGroup cg(KTextEditor::EditorPrivate::config(), "KTextEditor View");
         writeConfig(cg);
         KTextEditor::EditorPrivate::config()->sync();
     }
@@ -1528,6 +811,29 @@ void KateViewConfig::setDynWordWrap(bool wrap)
 
     m_dynWordWrapSet = true;
     m_dynWordWrap = wrap;
+
+    configEnd();
+}
+
+bool KateViewConfig::dynWrapAtStaticMarker() const
+{
+    if (m_dynWrapAtStaticMarkerSet || isGlobal()) {
+        return m_dynWrapAtStaticMarker;
+    }
+
+    return s_global->dynWrapAtStaticMarker();
+}
+
+void KateViewConfig::setDynWrapAtStaticMarker(bool on)
+{
+    if (m_dynWrapAtStaticMarkerSet && m_dynWrapAtStaticMarker == on) {
+        return;
+    }
+
+    configStart();
+
+    m_dynWrapAtStaticMarkerSet = true;
+    m_dynWrapAtStaticMarker = on;
 
     configEnd();
 }
@@ -2207,6 +1513,29 @@ void KateViewConfig::setSmartCopyCut(bool on)
     configEnd();
 }
 
+bool KateViewConfig::mousePasteAtCursorPosition() const
+{
+    if (m_mousePasteAtCursorPositionSet|| isGlobal()) {
+        return m_mousePasteAtCursorPosition;
+    }
+
+    return s_global->mousePasteAtCursorPosition();
+}
+
+void KateViewConfig::setMousePasteAtCursorPosition(bool on)
+{
+    if (m_mousePasteAtCursorPositionSet && m_mousePasteAtCursorPosition == on) {
+        return;
+    }
+
+    configStart();
+
+    m_mousePasteAtCursorPositionSet = true;
+    m_mousePasteAtCursorPosition = on;
+
+    configEnd();
+}
+
 bool KateViewConfig::scrollPastEnd() const
 {
     if (m_scrollPastEndSet || isGlobal()) {
@@ -2274,24 +1603,24 @@ void KateViewConfig::setShowWordCount(bool on)
     configEnd();
 }
 
-bool KateViewConfig::showLinesCount() const
+bool KateViewConfig::showLineCount() const
 {
-    if (m_showLinesCountSet || isGlobal()) {
-        return m_showLinesCount;
+    if (m_showLineCountSet || isGlobal()) {
+        return m_showLineCount;
     }
 
-    return s_global->showLinesCount();
+    return s_global->showLineCount();
 }
 
-void KateViewConfig::setShowLinesCount(bool on)
+void KateViewConfig::setShowLineCount(bool on)
 {
-    if (m_showLinesCountSet && m_showLinesCount == on) {
+    if (m_showLineCountSet && m_showLineCount == on) {
         return;
     }
 
     configStart();
-    m_showLinesCountSet = true;
-    m_showLinesCount = on;
+    m_showLineCountSet = true;
+    m_showLineCount = on;
     configEnd();
 }
 
@@ -2357,12 +1686,13 @@ KateRendererConfig::KateRendererConfig()
     s_global = this;
 
     // init with defaults from config or really hardcoded ones
-    KConfigGroup config(KTextEditor::EditorPrivate::config(), "Renderer");
+    KConfigGroup config(KTextEditor::EditorPrivate::config(), "KTextEditor Renderer");
     readConfig(config);
 }
 
 KateRendererConfig::KateRendererConfig(KateRenderer *renderer)
-    : m_fontMetrics(QFont()),
+    : KateConfig(s_global),
+      m_fontMetrics(QFont()),
       m_lineMarkerColor(KTextEditor::MarkInterface::reservedMarkersCount()),
       m_schemaSet(false),
       m_fontSet(false),
@@ -2411,6 +1741,9 @@ void KateRendererConfig::readConfig(const KConfigGroup &config)
 {
     configStart();
 
+    // read generic entries
+    readConfigEntries(config);
+
     // "Normal" Schema MUST BE THERE, see global kateschemarc
     setSchema(config.readEntry(KEY_SCHEMA, "Normal"));
 
@@ -2427,6 +1760,9 @@ void KateRendererConfig::readConfig(const KConfigGroup &config)
 
 void KateRendererConfig::writeConfig(KConfigGroup &config)
 {
+    // write generic entries
+    writeConfigEntries(config);
+
     config.writeEntry(KEY_SCHEMA, schema());
 
     config.writeEntry(KEY_WORD_WRAP_MARKER, wordWrapMarker());
@@ -2451,7 +1787,7 @@ void KateRendererConfig::updateConfig()
         }
 
         // write config
-        KConfigGroup cg(KTextEditor::EditorPrivate::config(), "Renderer");
+        KConfigGroup cg(KTextEditor::EditorPrivate::config(), "KTextEditor Renderer");
         writeConfig(cg);
         KTextEditor::EditorPrivate::config()->sync();
     }

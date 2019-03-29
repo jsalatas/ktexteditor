@@ -1,7 +1,7 @@
 /*  This file is part of the KDE libraries and the Kate part.
  *
  *  Copyright (C) 2005 Hamish Rodda <rodda@kde.org>
- *  Copyright (C) 2008 Dominik Haumann <dhaumann kde org>
+ *  Copyright (C) 2008-2018 Dominik Haumann <dhaumann@kde.org>
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -69,7 +69,7 @@ void KateLineLayoutMap::insert(int realLine, const KateLineLayoutPtr &lineLayout
     if (it != m_lineLayouts.end()) {
         (*it).second = lineLayoutPtr;
     } else {
-        it = qUpperBound(m_lineLayouts.begin(), m_lineLayouts.end(), LineLayoutPair(realLine, KateLineLayoutPtr()), lessThan);
+        it = std::upper_bound(m_lineLayouts.begin(), m_lineLayouts.end(), LineLayoutPair(realLine, KateLineLayoutPtr()), lessThan);
         m_lineLayouts.insert(it, LineLayoutPair(realLine, lineLayoutPtr));
     }
 }
@@ -98,9 +98,9 @@ void KateLineLayoutMap::viewWidthDecreased(int newWidth)
 void KateLineLayoutMap::relayoutLines(int startRealLine, int endRealLine)
 {
     LineLayoutMap::iterator start =
-        qLowerBound(m_lineLayouts.begin(), m_lineLayouts.end(), LineLayoutPair(startRealLine, KateLineLayoutPtr()), lessThan);
+        std::lower_bound(m_lineLayouts.begin(), m_lineLayouts.end(), LineLayoutPair(startRealLine, KateLineLayoutPtr()), lessThan);
     LineLayoutMap::iterator end =
-        qUpperBound(start, m_lineLayouts.end(), LineLayoutPair(endRealLine, KateLineLayoutPtr()), lessThan);
+        std::upper_bound(start, m_lineLayouts.end(), LineLayoutPair(endRealLine, KateLineLayoutPtr()), lessThan);
 
     while (start != end) {
         (*start).second->setLayoutDirty();
@@ -111,9 +111,9 @@ void KateLineLayoutMap::relayoutLines(int startRealLine, int endRealLine)
 void KateLineLayoutMap::slotEditDone(int fromLine, int toLine, int shiftAmount)
 {
     LineLayoutMap::iterator start =
-        qLowerBound(m_lineLayouts.begin(), m_lineLayouts.end(), LineLayoutPair(fromLine, KateLineLayoutPtr()), lessThan);
+        std::lower_bound(m_lineLayouts.begin(), m_lineLayouts.end(), LineLayoutPair(fromLine, KateLineLayoutPtr()), lessThan);
     LineLayoutMap::iterator end =
-        qUpperBound(start, m_lineLayouts.end(), LineLayoutPair(toLine, KateLineLayoutPtr()), lessThan);
+        std::upper_bound(start, m_lineLayouts.end(), LineLayoutPair(toLine, KateLineLayoutPtr()), lessThan);
     LineLayoutMap::iterator it;
 
     if (shiftAmount != 0) {

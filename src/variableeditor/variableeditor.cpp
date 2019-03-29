@@ -1,6 +1,6 @@
 /* This file is part of the KDE project
 
-   Copyright (C) 2011 Dominik Haumann <dhaumann kde org>
+   Copyright (C) 2011-2018 Dominik Haumann <dhaumann@kde.org>
 
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
@@ -324,7 +324,7 @@ VariableRemoveSpacesEditor::VariableRemoveSpacesEditor(VariableRemoveSpacesItem 
     m_comboBox = new QComboBox(this);
     m_comboBox->addItem(i18nc("value for variable remove-trailing-spaces", "none"));
     m_comboBox->addItem(i18nc("value for variable remove-trailing-spaces", "modified"));
-    m_comboBox->addItem(i18nc("value for variale remove-trailing-spaces", "all"));
+    m_comboBox->addItem(i18nc("value for variable remove-trailing-spaces", "all"));
     m_comboBox->setCurrentIndex(item->value());
     l->addWidget(m_comboBox, 0, 2, Qt::AlignLeft);
 

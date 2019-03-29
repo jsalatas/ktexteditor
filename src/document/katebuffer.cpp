@@ -335,8 +335,6 @@ void KateBuffer::setHighlight(int hlMode)
             invalidate = true;
         }
 
-        h->use();
-
         m_highlight = h;
 
         if (invalidate) {
@@ -371,40 +369,7 @@ void KateBuffer::doHighlight(int startLine, int endLine, bool invalidate)
     t.start();
     qCDebug(LOG_KTE) << "HIGHLIGHTED START --- NEED HL, LINESTART: " << startLine << " LINEEND: " << endLine;
     qCDebug(LOG_KTE) << "HL UNTIL LINE: " << m_lineHighlighted;
-    qCDebug(LOG_KTE) << "HL DYN COUNT: " << KateHlManager::self()->countDynamicCtxs() << " MAX: " << m_maxDynamicContexts;
 #endif
-
-    // see if there are too many dynamic contexts; if yes, invalidate HL of all documents
-    if (KateHlManager::self()->countDynamicCtxs() >= m_maxDynamicContexts) {
-        {
-            if (KateHlManager::self()->resetDynamicCtxs()) {
-#ifdef BUFFER_DEBUGGING
-                qCDebug(LOG_KTE) << "HL invalidated - too many dynamic contexts ( >= " << m_maxDynamicContexts << ")";
-#endif
-
-                // avoid recursive invalidation
-                KateHlManager::self()->setForceNoDCReset(true);
-
-                foreach (KTextEditor::DocumentPrivate *doc, KTextEditor::EditorPrivate::self()->kateDocuments()) {
-                    doc->makeAttribs();
-                }
-
-                // doHighlight *shall* do his work. After invalidation, some highlight has
-                // been recalculated, but *maybe not* until endLine ! So we shall force it manually...
-                doHighlight(m_lineHighlighted, endLine, false);
-                m_lineHighlighted = endLine;
-
-                KateHlManager::self()->setForceNoDCReset(false);
-                return;
-            } else {
-                m_maxDynamicContexts *= 2;
-
-#ifdef BUFFER_DEBUGGING
-                qCDebug(LOG_KTE) << "New dynamic contexts limit: " << m_maxDynamicContexts;
-#endif
-            }
-        }
-    }
 
     // if possible get previous line, otherwise create 0 line.
     Kate::TextLine prevLine = (startLine >= 1) ? plainLine(startLine - 1) : Kate::TextLine();
@@ -455,7 +420,7 @@ void KateBuffer::doHighlight(int startLine, int endLine, bool invalidate)
     }
 
     /**
-     * perhaps we need to adjust the maximal highlighed line
+     * perhaps we need to adjust the maximal highlighted line
      */
     int oldHighlighted = m_lineHighlighted;
     if (ctxChanged || current_line > m_lineHighlighted) {
@@ -598,8 +563,8 @@ KTextEditor::Range KateBuffer::computeFoldingRangeForStartLine(int startLine)
         /**
          * walk over all attributes of the line and compute the matchings
          */
-        const QVector<Kate::TextLineData::Attribute> &startLineAttributes = startTextLine->attributesList();
-        for (int i = 0; i < startLineAttributes.size(); ++i) {
+        const auto &startLineAttributes = startTextLine->foldings();
+        for (size_t i = 0; i < startLineAttributes.size(); ++i) {
             /**
              * folding close?
              */
@@ -667,8 +632,8 @@ KTextEditor::Range KateBuffer::computeFoldingRangeForStartLine(int startLine)
         /**
          * search for matching end marker
          */
-        const QVector<Kate::TextLineData::Attribute> &lineAttributes = textLine->attributesList();
-        for (int i = 0; i < lineAttributes.size(); ++i) {
+        const auto &lineAttributes = textLine->foldings();
+        for (size_t i = 0; i < lineAttributes.size(); ++i) {
             /**
              * matching folding close?
              */

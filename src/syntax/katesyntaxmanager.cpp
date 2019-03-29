@@ -27,7 +27,6 @@
 
 #include "katetextline.h"
 #include "katedocument.h"
-#include "katesyntaxdocument.h"
 #include "katerenderer.h"
 #include "kateglobal.h"
 #include "kateschema.h"
@@ -39,17 +38,6 @@
 
 #include <KConfigGroup>
 #include <KColorUtils>
-#include <KMessageBox>
-
-#include <QSet>
-#include <QAction>
-#include <QStringList>
-#include <QTextStream>
-#include <QFile>
-#include <QDir>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QXmlStreamReader>
 //END
 
 using namespace KTextEditor;
@@ -59,34 +47,7 @@ KateHlManager::KateHlManager()
     : QObject()
     , m_config(KTextEditor::EditorPrivate::unitTestMode() ? QString() :QStringLiteral("katesyntaxhighlightingrc")
     , KTextEditor::EditorPrivate::unitTestMode() ? KConfig::SimpleConfig : KConfig::NoGlobals) // skip config for unit tests!
-    , commonSuffixes({QStringLiteral(".orig"), QStringLiteral(".new"), QStringLiteral("~"), QStringLiteral(".bak"), QStringLiteral(".BAK")})
 {
-    // Let's build the Mode List
-    setupModeList();
-
-    lastCtxsReset.start();
-}
-
-KateHlManager::~KateHlManager()
-{
-    qDeleteAll(hlList);
-}
-
-void KateHlManager::setupModeList()
-{
-    const auto defs = m_repository.definitions();
-    hlList.reserve(defs.size() + 1);
-    hlDict.reserve(defs.size() + 1);
-    for (int i = 0; i < defs.count(); i++) {
-        KateHighlighting *hl = new KateHighlighting(defs.at(i));
-        hlList.push_back(hl);
-        hlDict.insert(hl->name(), hl);
-    }
-
-    // Normal HL
-    KateHighlighting *hl = new KateHighlighting(KSyntaxHighlighting::Definition());
-    hlList.prepend(hl);
-    hlDict.insert(hl->name(), hl);
 }
 
 KateHlManager *KateHlManager::self()
@@ -96,17 +57,23 @@ KateHlManager *KateHlManager::self()
 
 KateHighlighting *KateHlManager::getHl(int n)
 {
-    if (n < 0 || n >= hlList.count()) {
-        n = 0;
+    // default to "None", must exist
+    if (n < 0 || n >= modeList().count()) {
+        n = nameFind(QStringLiteral("None"));
+        Q_ASSERT(n >= 0);
     }
 
-    return hlList.at(n);
+    // construct it on demand
+    if (!m_hlDict.contains(modeList().at(n).name())) {
+        m_hlDict[modeList().at(n).name()] = std::make_shared<KateHighlighting>(modeList().at(n));
+    }
+    return m_hlDict[modeList().at(n).name()].get();
 }
 
 int KateHlManager::nameFind(const QString &name)
 {
-    for (int i = 0; i < hlList.count(); ++i) {
-        if (hlList.at(i)->name().compare(name, Qt::CaseInsensitive) == 0) {
+    for (int i = 0; i < modeList().count(); ++i) {
+        if (modeList().at(i).name().compare(name, Qt::CaseInsensitive) == 0) {
             return i;
         }
     }
@@ -619,7 +586,7 @@ void KateHlManager::setDefaults(const QString &schema, KateAttributeList &list, 
         settings << (p->hasProperty(QTextFormat::FontWeight) ? (p->fontBold() ? one : zero) : QString());
         settings << (p->hasProperty(QTextFormat::FontItalic) ? (p->fontItalic() ? one : zero) : QString());
         settings << (p->hasProperty(QTextFormat::FontStrikeOut) ? (p->fontStrikeOut() ? one : zero) : QString());
-        settings << (p->hasProperty(QTextFormat::FontUnderline) ? (p->fontUnderline() ? one : zero) : QString());
+        settings << (p->hasProperty(QTextFormat::TextUnderlineStyle) ? (p->fontUnderline() ? one : zero) : QString());
         settings << (p->hasProperty(QTextFormat::BackgroundBrush) ? QString::number(p->background().color().rgb(), 16) : dash);
         settings << (p->hasProperty(SelectedBackground) ? QString::number(p->selectedBackground().color().rgb(), 16) : dash);
         settings << (p->hasProperty(QTextFormat::FontFamily) ? (p->fontFamily()) : QString());
@@ -631,87 +598,31 @@ void KateHlManager::setDefaults(const QString &schema, KateAttributeList &list, 
     emit changed();
 }
 
-int KateHlManager::highlights()
-{
-    return (int) hlList.count();
-}
-
-QString KateHlManager::hlName(int n)
-{
-    return hlList.at(n)->name();
-}
-
-QString KateHlManager::hlNameTranslated(int n)
-{
-    return hlList.at(n)->nameTranslated();
-}
-
-QString KateHlManager::hlSection(int n)
-{
-    return hlList.at(n)->section();
-}
-
-bool KateHlManager::hlHidden(int n)
-{
-    return hlList.at(n)->hidden();
-}
-
-QString KateHlManager::identifierForName(const QString &name)
-{
-    if (hlDict.contains(name)) {
-        return hlDict[name]->getIdentifier();
-    }
-
-    return QString();
-}
-
-QString KateHlManager::nameForIdentifier(const QString &identifier)
-{
-    for (QHash<QString, KateHighlighting *>::iterator it = hlDict.begin();
-            it != hlDict.end(); ++it) {
-        if ((*it)->getIdentifier() == identifier) {
-            return it.key();
-        }
-    }
-
-    return QString();
-}
-
-bool KateHlManager::resetDynamicCtxs()
-{
-    if (forceNoDCReset) {
-        return false;
-    }
-
-    if (lastCtxsReset.elapsed() < KATE_DYNAMIC_CONTEXTS_RESET_DELAY) {
-        return false;
-    }
-
-    foreach (KateHighlighting *hl, hlList) {
-        hl->dropDynamicContexts();
-    }
-
-    dynamicCtxsCount = 0;
-    lastCtxsReset.start();
-
-    return true;
-}
-
 void KateHlManager::reload()
 {
-    // clear syntax document cache
-    syntax.clearCache();
+    /**
+     * copy current loaded hls from hash to trigger recreation
+     */
+    auto oldHls = m_hlDict;
+    m_hlDict.clear();
 
-    resetDynamicCtxs();
+    /**
+     * recreate repository
+     * this might even remove highlighting modes known before
+     */
+    m_repository.reload();
 
-    for(int i = 0; i < highlights(); i++)
-    {
-        getHl(i)->reload();
-    }
-
-    foreach(KTextEditor::DocumentPrivate* doc, KTextEditor::EditorPrivate::self()->kateDocuments())
-    {
-        doc->makeAttribs();
+    /**
+     * let all documents use the new highlighters
+     * will be created on demand
+     * if old hl not found, use none
+     */
+    for (KTextEditor::DocumentPrivate* doc : KTextEditor::EditorPrivate::self()->kateDocuments()) {
+        auto hlMode = doc->highlightingMode();
+        if (nameFind(hlMode) < 0) {
+            hlMode = QStringLiteral("None");
+        }
+        doc->setHighlightingMode(hlMode);
     }
 }
 //END

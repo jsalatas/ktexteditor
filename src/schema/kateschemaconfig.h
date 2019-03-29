@@ -1,7 +1,7 @@
 /* This file is part of the KDE libraries
    Copyright (C) 2001-2003 Christoph Cullmann <cullmann@kde.org>
    Copyright (C) 2002, 2003 Anders Lund <anders.lund@lund.tdcadsl.dk>
-   Copyright (C) 2012 Dominik Haumann <dhaumann kde org>
+   Copyright (C) 2012-2018 Dominik Haumann <dhaumann@kde.org>
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -19,8 +19,8 @@
  *  Boston, MA 02110-1301, USA.
  */
 
-#ifndef __KATE_SCHEMA_CONFIG_H__
-#define __KATE_SCHEMA_CONFIG_H__
+#ifndef KATE_SCHEMA_CONFIG_H
+#define KATE_SCHEMA_CONFIG_H
 
 #include "katedialogs.h"
 #include "katecolortreewidget.h"
@@ -102,7 +102,7 @@ class KateSchemaConfigDefaultStylesTab : public QWidget
     Q_OBJECT
 
 public:
-    KateSchemaConfigDefaultStylesTab(KateSchemaConfigColorTab *colorTab);
+    explicit KateSchemaConfigDefaultStylesTab(KateSchemaConfigColorTab *colorTab);
     ~KateSchemaConfigDefaultStylesTab() override;
 
 Q_SIGNALS:
@@ -164,7 +164,7 @@ private:
     QString m_schema;
     int m_hl;
 
-    QHash<QString, QHash<int, QList<KTextEditor::Attribute::Ptr> > > m_hlDict;
+    QHash<QString, QHash<int, QVector<KTextEditor::Attribute::Ptr> > > m_hlDict;
 
 public:
     QList<int> hlsForSchema(const QString &schema);

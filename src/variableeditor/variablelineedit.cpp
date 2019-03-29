@@ -1,6 +1,6 @@
 /* This file is part of the KDE project
 
-   Copyright (C) 2011 Dominik Haumann <dhaumann kde org>
+   Copyright (C) 2011-2018 Dominik Haumann <dhaumann@kde.org>
    Copyright (C) 2013 Gerald Senarclens de Grancy <oss@senarclens.eu>
 
    This library is free software; you can redistribute it and/or
@@ -49,7 +49,7 @@ VariableLineEdit::VariableLineEdit(QWidget *parent)
     m_listview = nullptr;
 
     QHBoxLayout *hl = new QHBoxLayout();
-    hl->setMargin(0);
+    hl->setContentsMargins(0, 0, 0, 0);
     hl->setSpacing(QApplication::style()->pixelMetric(QStyle::PM_DefaultLayoutSpacing));
     setLayout(hl);
 
@@ -65,7 +65,7 @@ VariableLineEdit::VariableLineEdit(QWidget *parent)
     m_popup->setFrameStyle(QFrame::StyledPanel | QFrame::Raised);
     QVBoxLayout *l = new QVBoxLayout(m_popup);
     l->setSpacing(0);
-    l->setMargin(0);
+    l->setContentsMargins(0, 0, 0, 0);
     m_popup->setLayout(l);
 
     // forward text changed signal
@@ -213,13 +213,12 @@ void VariableLineEdit::addKateItems(VariableListView *listview)
 
     // Add 'syntax' (hl) to list
     /* Prepare list of highlighting modes */
-    const int count = KateHlManager::self()->highlights();
-    QStringList hl;
-    for (int z = 0; z < count; ++z) {
-        hl << KateHlManager::self()->hlName(z);
+    QStringList hls;
+    for (const auto &hl : KateHlManager::self()->modeList()) {
+        hls << hl.name();
     }
 
-    item = new VariableStringListItem(QStringLiteral("syntax"), hl, hl.at(0));
+    item = new VariableStringListItem(QStringLiteral("syntax"), hls, hls.at(0));
     if (activeDoc) {
         static_cast<VariableStringListItem *>(item)->setValue(activeDoc->highlightingMode());
     }

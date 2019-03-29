@@ -43,7 +43,7 @@ class KTEXTEDITOR_EXPORT KateScriptView : public QObject
     Q_OBJECT
 
 public:
-    KateScriptView(QJSEngine *, QObject *parent = nullptr);
+    explicit KateScriptView(QJSEngine *, QObject *parent = nullptr);
     void setView(KTextEditor::ViewPrivate *view);
     KTextEditor::ViewPrivate *view();
 
@@ -68,6 +68,10 @@ public:
     Q_INVOKABLE void clearSelection();
 
     Q_INVOKABLE void align(const QJSValue &range);
+
+    Q_INVOKABLE QJSValue executeCommand(const QString &command,
+                                        const QString &args = QString(),
+                                        const QJSValue &jsrange = QJSValue());
 
 private:
     KTextEditor::ViewPrivate *m_view;

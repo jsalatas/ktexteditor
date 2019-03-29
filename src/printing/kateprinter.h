@@ -20,8 +20,8 @@
  *  Boston, MA 02110-1301, USA.
  */
 
-#ifndef __KATE_PRINTER_H__
-#define __KATE_PRINTER_H__
+#ifndef KATE_PRINTER_H
+#define KATE_PRINTER_H
 
 namespace KTextEditor
 {
@@ -45,14 +45,14 @@ namespace KatePrinter
 
     /**
      * Overloaded print function for document
-     * Usefull when there is no view for the document. Consequently this function
+     * Useful when there is no view for the document. Consequently this function
      * cannot print only selected portion of document.
      */
     bool print(KTextEditor::DocumentPrivate *doc);
 
     /**
      * Overloaded print function for document
-     * Usefull when there is no view for the document. Consequently this function
+     * Useful when there is no view for the document. Consequently this function
      * cannot print only selected portion of document.
      */
     bool printPreview(KTextEditor::DocumentPrivate *doc);

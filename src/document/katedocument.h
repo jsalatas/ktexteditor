@@ -36,6 +36,7 @@
 #include <ktexteditor/movinginterface.h>
 #include <ktexteditor/message.h>
 #include <ktexteditor/mainwindow.h>
+#include <ktexteditor/inlinenoteinterface.h>
 
 #include <ktexteditor_export.h>
 #include "katetextline.h"
@@ -266,6 +267,7 @@ public:
      * @return true on success
      */
     bool editInsertText(int line, int col, const QString &s);
+
     /**
      * Remove a string in the given line/column
      * @param line line number
@@ -278,7 +280,7 @@ public:
     /**
      * Mark @p line as @p autowrapped. This is necessary if static word warp is
      * enabled, because we have to know whether to insert a new line or add the
-     * wrapped words to the followin line.
+     * wrapped words to the following line.
      * @param line line number
      * @param autowrapped autowrapped?
      * @return true on success
@@ -296,6 +298,7 @@ public:
      * @return true on success
      */
     bool editWrapLine(int line, int col, bool newLine = true, bool *newLineAdded = nullptr);
+
     /**
      * Unwrap @p line. If @p removeLine is true, we force to join the lines. If
      * @p removeLine is true, @p length is ignored (eg not needed).
@@ -312,6 +315,7 @@ public:
      * @return true on success
      */
     bool editInsertLine(int line, const QString &s);
+
     /**
      * Remove a line
      * @param line line number
@@ -322,17 +326,30 @@ public:
     bool editRemoveLines(int from, int to);
 
     /**
-     * Remove a line
+     * Warp a line
      * @param startLine line to begin wrapping
      * @param endLine line to stop wrapping
      * @return true on success
      */
     bool wrapText(int startLine, int endLine);
+
+    /**
+     * Wrap lines touched by the selection with respect of existing paragraphs.
+     * To do so will the paragraph prior to the wrap joined as one single line
+     * which cause an almost perfect wrapped paragraph as long as there are no
+     * unneeded spaces exist or some formatting like this comment block.
+     * Without any selection the current line is wrapped.
+     * Empty lines around each paragraph are untouched.
+     * @param first line to begin wrapping
+     * @param last line to stop wrapping
+     * @return true on success
+     */
+    bool wrapParagraph(int first, int last);
 //END LINE BASED INSERT/REMOVE STUFF
 
 Q_SIGNALS:
     /**
-     * Emmitted when text from @p line was wrapped at position pos onto line @p nextLine.
+     * Emitted when text from @p line was wrapped at position pos onto line @p nextLine.
      */
     void editLineWrapped(int line, int col, int len);
 
@@ -359,9 +376,9 @@ private:
     QStack<int> editStateStack;
     bool editIsRunning = false;
     bool m_undoMergeAllEdits = false;
+    KTextEditor::Cursor m_editLastChangeStartCursor = KTextEditor::Cursor::invalid();
     QStack<QSharedPointer<KTextEditor::MovingCursor>> m_editingStack;
     int m_editingStackPosition = -1;
-    static const int s_editingStackSizeLimit = 32;
 
     //
     // KTextEditor::UndoInterface stuff
@@ -380,7 +397,7 @@ public Q_SLOTS:
      * If the consecutive editings happens in the same line, then remove
      * the previous and add the new one with updated column no.
      */
-    void saveEditingPositions(KTextEditor::Document *, const KTextEditor::Range &range);
+    void saveEditingPositions(const KTextEditor::Cursor &cursor);
 
 public:
     uint undoCount() const;
@@ -1010,7 +1027,7 @@ private:
      * Create a git compatible sha1 checksum of the file, if it is a local file.
      * The result can be accessed through KateBuffer::digest().
      *
-     * @return wheather the operation was attempted and succeeded.
+     * @return whether the operation was attempted and succeeded.
      */
     bool createDigest();
 
@@ -1102,8 +1119,6 @@ public Q_SLOTS:
 public:
     bool queryClose() override;
 
-    void makeAttribs(bool needInvalidate = true);
-
     static bool checkOverwrite(QUrl u, QWidget *parent);
 
     /**
@@ -1122,6 +1137,8 @@ public:
     void updateConfig();
 
 private:
+    void makeAttribs(bool needInvalidate = true);
+
     KateDocumentConfig *const m_config;
 
     /**
@@ -1163,7 +1180,7 @@ private:
     static bool checkIntValue(QString value, int *result);
     /**
       Feeds value into @p col using QColor::setNamedColor() and returns
-      wheather the color is valid
+      whether the color is valid
     */
     static bool checkColorValue(QString value, QColor &col);
 
@@ -1242,8 +1259,6 @@ public:
                              KTextEditor::DocumentPrivate::OffsetList &decToEncOffsetList,
                              KTextEditor::DocumentPrivate::OffsetList &encToDecOffsetList);
     void replaceCharactersByEncoding(const KTextEditor::Range &range);
-
-    enum EncodedCharaterInsertionPolicy {EncodeAlways, EncodeWhenPresent, EncodeNever};
 
 protected:
     KateOnTheFlyChecker *m_onTheFlyChecker = nullptr;
@@ -1362,7 +1377,7 @@ private:
 
 public:
     /**
-     * reads the line length limit from config, if it is not overriden
+     * reads the line length limit from config, if it is not overridden
      */
     int lineLengthLimit() const;
 
@@ -1387,7 +1402,7 @@ private:
      */
     QSharedPointer<KTextEditor::MovingRange> m_currentAutobraceRange;
     /**
-     * current autobrace closing charater (e.g. ']')
+     * current autobrace closing character (e.g. ']')
      */
     QChar m_currentAutobraceClosingChar;
 

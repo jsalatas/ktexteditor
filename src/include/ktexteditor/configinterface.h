@@ -47,19 +47,19 @@ namespace KTextEditor
  * the interface:
  * \code
  * // ptr is of type KTextEditor::Document* or KTextEditor::View*
- * KTextEditor::ConfigInterface *iface =
- *     qobject_cast<KTextEditor::ConfigInterface*>( ptr );
+ * auto iface = qobject_cast<KTextEditor::ConfigInterface*>(ptr);
  *
- * if( iface ) {
- *
+ * if (iface) {
  *     // the implementation supports the interface
  *     // do stuff
+ * } else {
+ *     // the implementation does not support the interface
  * }
  * \endcode
  *
  * \section config_data Accessing Data
  *
- * A list of available config variables (or keys) can be optained by calling
+ * A list of available config variables (or keys) can be obtained by calling
  * configKeys(). For all available keys configValue() returns the corresponding
  * value as QVariant. A value for a given key can be set by calling
  * setConfigValue(). Right now, when using KatePart as editor component,

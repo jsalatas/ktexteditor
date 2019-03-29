@@ -90,7 +90,7 @@ public:
     typedef QSharedPointer<MovingCursor> Ptr;
 
     //
-    // stuff that needs to be implemented by editor part cusors
+    // stuff that needs to be implemented by editor part cursors
     //
 public:
     /**

@@ -139,15 +139,14 @@ search/katesearchbar.cpp
 # syntax related stuff (highlighting, xml file parsing, ...)
 syntax/katesyntaxmanager.cpp
 syntax/katehighlight.cpp
-syntax/katehighlighthelpers.cpp
 syntax/katehighlightmenu.cpp
-syntax/katesyntaxdocument.cpp
 syntax/katehighlightingcmds.cpp
 
 # view stuff (THE view and its helpers)
 view/kateview.cpp
 view/kateviewinternal.cpp
 view/kateviewhelpers.cpp
+view/kateannotationitemdelegate.cpp
 view/katemessagewidget.cpp
 view/katefadeeffect.cpp
 view/kateanimation.cpp
@@ -198,6 +197,8 @@ utils/mainwindow.cpp
 utils/katedefaultcolors.cpp
 utils/katecommandrangeexpressionparser.cpp
 utils/katesedcmd.cpp
+utils/katemacroexpander.cpp
+utils/variable.cpp
 
 # schema
 schema/kateschema.cpp
@@ -225,6 +226,9 @@ inputmode/katenormalinputmodefactory.cpp
 if(EditorConfig_FOUND)
     set(ktexteditor_LIB_SRCS ${ktexteditor_LIB_SRCS} document/editorconfig.cpp)
 endif()
+
+ecm_qt_declare_logging_category(ktexteditor_LIB_SRCS HEADER katepartdebug.h IDENTIFIER LOG_KTE CATEGORY_NAME org.kde.ktexteditor DEFAULT_SEVERITY Warning)
+
 
 ki18n_wrap_ui(ktexteditor_LIB_SRCS
 dialogs/textareaappearanceconfigwidget.ui
@@ -315,6 +319,7 @@ PRIVATE
   KF5::ItemViews
   KF5::SonnetCore
   KF5::SyntaxHighlighting
+  KF5::AuthCore
   ${KTEXTEDITOR_OPTIONAL_LIBS}
 )
 
@@ -366,7 +371,7 @@ install(FILES ${PRI_FILENAME} DESTINATION ${ECM_MKSPECS_INSTALL_DIR})
 
 add_executable(kauth_ktexteditor_helper buffer/katesecuretextbuffer.cpp)
 target_link_libraries(kauth_ktexteditor_helper
-  KF5::Auth
+  KF5::AuthCore
 )
 install(TARGETS kauth_ktexteditor_helper DESTINATION ${KAUTH_HELPER_INSTALL_DIR} )
 kauth_install_helper_files(kauth_ktexteditor_helper org.kde.ktexteditor.katetextbuffer root)

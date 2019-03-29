@@ -40,7 +40,6 @@
 #include "katemodeconfigpage.h"
 #include "kateview.h"
 #include "spellcheck/spellcheck.h"
-#include "kateglobal.h"
 
 // auto generated ui files
 #include "ui_textareaappearanceconfigwidget.h"
@@ -71,6 +70,7 @@
 #include <KActionCollection>
 
 #include <QFile>
+#include <QClipboard>
 #include <QMap>
 #include <QStringList>
 #include <QTextCodec>
@@ -86,6 +86,7 @@
 #include <QLabel>
 #include <QLayout>
 #include <QRadioButton>
+#include <QSettings>
 #include <QSlider>
 #include <QSpinBox>
 #include <QTabBar>
@@ -93,9 +94,6 @@
 #include <QToolButton>
 #include <QWhatsThis>
 #include <QDomDocument>
-
-// trailing slash is important
-#define HLDOWNLOADPATH QStringLiteral("http://kate.kde.org/syntax/")
 
 //END
 
@@ -346,9 +344,14 @@ void KateSpellCheckConfigTab::apply()
     }
     m_changed = false;
 
+    // WARNING: this is slightly hackish, but it's currently the only way to
+    //          do it, see also the KTextEdit class
     KateDocumentConfig::global()->configStart();
     m_sonnetConfigWidget->save();
+    QSettings settings(QStringLiteral("KDE"), QStringLiteral("Sonnet"));
+    KateDocumentConfig::global()->setOnTheFlySpellCheck(settings.value(QStringLiteral("checkerEnabledByDefault"), false).toBool());
     KateDocumentConfig::global()->configEnd();
+
     foreach (KTextEditor::DocumentPrivate *doc, KTextEditor::EditorPrivate::self()->kateDocuments()) {
         doc->refreshOnTheFlyCheck();
     }
@@ -481,6 +484,7 @@ KateEditGeneralConfigTab::KateEditGeneralConfigTab(QWidget *parent)
     connect(ui->sbWordWrap, SIGNAL(valueChanged(int)), this, SLOT(slotChanged()));
     connect(ui->chkAutoBrackets, SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
     connect(ui->chkSmartCopyCut, SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
+    connect(ui->chkMousePasteAtCursorPosition, SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
     connect(ui->cmbInputMode, SIGNAL(currentIndexChanged(int)), this, SLOT(slotChanged()));
 
     // "What's this?" help is in the ui-file
@@ -512,6 +516,7 @@ void KateEditGeneralConfigTab::apply()
 
     KateViewConfig::global()->setAutoBrackets(ui->chkAutoBrackets->isChecked());
     KateViewConfig::global()->setSmartCopyCut(ui->chkSmartCopyCut->isChecked());
+    KateViewConfig::global()->setMousePasteAtCursorPosition(ui->chkMousePasteAtCursorPosition->isChecked());
 
     KateViewConfig::global()->setInputModeRaw(ui->cmbInputMode->currentData().toInt());
 
@@ -527,6 +532,7 @@ void KateEditGeneralConfigTab::reload()
     ui->sbWordWrap->setValue(KateDocumentConfig::global()->wordWrapAt());
     ui->chkAutoBrackets->setChecked(KateViewConfig::global()->autoBrackets());
     ui->chkSmartCopyCut->setChecked(KateViewConfig::global()->smartCopyCut());
+    ui->chkMousePasteAtCursorPosition->setChecked(KateViewConfig::global()->mousePasteAtCursorPosition());
 
     const int id = static_cast<int>(KateViewConfig::global()->inputMode());
     ui->cmbInputMode->setCurrentIndex(ui->cmbInputMode->findData(id));
@@ -549,7 +555,7 @@ KateEditConfigTab::KateEditConfigTab(QWidget *parent)
     , spellCheckConfigTab(new KateSpellCheckConfigTab(this))
 {
     QVBoxLayout *layout = new QVBoxLayout;
-    layout->setMargin(0);
+    layout->setContentsMargins(0, 0, 0, 0);
     QTabWidget *tabWidget = new QTabWidget(this);
 
     // add all tabs
@@ -660,7 +666,7 @@ KateViewDefaultsConfig::KateViewDefaultsConfig(QWidget *parent)
     QLayout *layout = new QVBoxLayout(this);
     QTabWidget *tabWidget = new QTabWidget(this);
     layout->addWidget(tabWidget);
-    layout->setMargin(0);
+    layout->setContentsMargins(0, 0, 0, 0);
 
     QWidget *textareaTab = new QWidget(tabWidget);
     textareaUi->setupUi(textareaTab);
@@ -683,17 +689,18 @@ KateViewDefaultsConfig::KateViewDefaultsConfig(QWidget *parent)
     //
 
     connect(textareaUi->gbWordWrap, SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
+    connect(textareaUi->chkDynWrapAtStaticMarker, SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
     connect(textareaUi->cmbDynamicWordWrapIndicator, SIGNAL(activated(int)), this, SLOT(slotChanged()));
     connect(textareaUi->sbDynamicWordWrapDepth, SIGNAL(valueChanged(int)), this, SLOT(slotChanged()));
     connect(textareaUi->chkShowTabs, SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
-    connect(textareaUi->chkShowSpaces, SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
+    connect(textareaUi->spacesComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &KateViewDefaultsConfig::slotChanged);
     connect(textareaUi->chkShowIndentationLines, SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
     connect(textareaUi->sliSetMarkerSize, SIGNAL(valueChanged(int)), this, SLOT(slotChanged()));
     connect(textareaUi->chkShowWholeBracketExpression, SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
     connect(textareaUi->chkAnimateBracketMatching, SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
     connect(textareaUi->chkFoldFirstLine,  SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
     connect(textareaUi->chkShowWordCount,  SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
-    connect(textareaUi->chkShowLinesCount, SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
+    connect(textareaUi->chkShowLineCount, SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
 
     connect(bordersUi->chkIconBorder, SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
     connect(bordersUi->chkScrollbarMarks, SIGNAL(toggled(bool)), this, SLOT(slotChanged()));
@@ -729,10 +736,11 @@ void KateViewDefaultsConfig::apply()
     KateRendererConfig::global()->configStart();
 
     KateViewConfig::global()->setDynWordWrap(textareaUi->gbWordWrap->isChecked());
+    KateViewConfig::global()->setDynWrapAtStaticMarker(textareaUi->chkDynWrapAtStaticMarker->isChecked());
     KateViewConfig::global()->setDynWordWrapIndicators(textareaUi->cmbDynamicWordWrapIndicator->currentIndex());
     KateViewConfig::global()->setDynWordWrapAlignIndent(textareaUi->sbDynamicWordWrapDepth->value());
     KateDocumentConfig::global()->setShowTabs(textareaUi->chkShowTabs->isChecked());
-    KateDocumentConfig::global()->setShowSpaces(textareaUi->chkShowSpaces->isChecked());
+    KateDocumentConfig::global()->setShowSpaces(KateDocumentConfig::WhitespaceRendering(textareaUi->spacesComboBox->currentIndex()));
     KateDocumentConfig::global()->setMarkerSize(textareaUi->sliSetMarkerSize->value());
     KateViewConfig::global()->setLineNumbers(bordersUi->chkLineNumbers->isChecked());
     KateViewConfig::global()->setIconBar(bordersUi->chkIconBorder->isChecked());
@@ -752,7 +760,7 @@ void KateViewDefaultsConfig::apply()
     KateRendererConfig::global()->setAnimateBracketMatching(textareaUi->chkAnimateBracketMatching->isChecked());
     KateViewConfig::global()->setFoldFirstLine(textareaUi->chkFoldFirstLine->isChecked());
     KateViewConfig::global()->setShowWordCount(textareaUi->chkShowWordCount->isChecked());
-    KateViewConfig::global()->setShowLinesCount(textareaUi->chkShowLinesCount->isChecked());
+    KateViewConfig::global()->setShowLineCount(textareaUi->chkShowLineCount->isChecked());
 
     KateRendererConfig::global()->configEnd();
     KateViewConfig::global()->configEnd();
@@ -761,10 +769,11 @@ void KateViewDefaultsConfig::apply()
 void KateViewDefaultsConfig::reload()
 {
     textareaUi->gbWordWrap->setChecked(KateViewConfig::global()->dynWordWrap());
+    textareaUi->chkDynWrapAtStaticMarker->setChecked(KateViewConfig::global()->dynWrapAtStaticMarker());
     textareaUi->cmbDynamicWordWrapIndicator->setCurrentIndex(KateViewConfig::global()->dynWordWrapIndicators());
     textareaUi->sbDynamicWordWrapDepth->setValue(KateViewConfig::global()->dynWordWrapAlignIndent());
     textareaUi->chkShowTabs->setChecked(KateDocumentConfig::global()->showTabs());
-    textareaUi->chkShowSpaces->setChecked(KateDocumentConfig::global()->showSpaces());
+    textareaUi->spacesComboBox->setCurrentIndex(KateDocumentConfig::global()->showSpaces());
     textareaUi->sliSetMarkerSize->setValue(KateDocumentConfig::global()->markerSize());
     bordersUi->chkLineNumbers->setChecked(KateViewConfig::global()->lineNumbers());
     bordersUi->chkIconBorder->setChecked(KateViewConfig::global()->iconBar());
@@ -784,7 +793,7 @@ void KateViewDefaultsConfig::reload()
     textareaUi->chkAnimateBracketMatching->setChecked(KateRendererConfig::global()->animateBracketMatching());
     textareaUi->chkFoldFirstLine->setChecked(KateViewConfig::global()->foldFirstLine());
     textareaUi->chkShowWordCount->setChecked(KateViewConfig::global()->showWordCount());
-    textareaUi->chkShowLinesCount->setChecked(KateViewConfig::global()->showLinesCount());
+    textareaUi->chkShowLineCount->setChecked(KateViewConfig::global()->showLineCount());
 }
 
 void KateViewDefaultsConfig::reset()
@@ -823,7 +832,7 @@ KateSaveConfigTab::KateSaveConfigTab(QWidget *parent)
     // since it is another tab itself on the config dialog. This means we should
     // initialize, add and work with as we do with modeConfigPage (ereslibre)
     QVBoxLayout *layout = new QVBoxLayout;
-    layout->setMargin(0);
+    layout->setContentsMargins(0, 0, 0, 0);
     QTabWidget *tabWidget = new QTabWidget(this);
 
     QWidget *tmpWidget = new QWidget(tabWidget);
@@ -931,15 +940,8 @@ void KateSaveConfigTab::apply()
         uiadv->edtBackupSuffix->setText(QStringLiteral("~"));
     }
 
-    uint f(0);
-    if (uiadv->chkBackupLocalFiles->isChecked()) {
-        f |= KateDocumentConfig::LocalFiles;
-    }
-    if (uiadv->chkBackupRemoteFiles->isChecked()) {
-        f |= KateDocumentConfig::RemoteFiles;
-    }
-
-    KateDocumentConfig::global()->setBackupFlags(f);
+    KateDocumentConfig::global()->setBackupOnSaveLocal(uiadv->chkBackupLocalFiles->isChecked());
+    KateDocumentConfig::global()->setBackupOnSaveRemote(uiadv->chkBackupRemoteFiles->isChecked());
     KateDocumentConfig::global()->setBackupPrefix(uiadv->edtBackupPrefix->text());
     KateDocumentConfig::global()->setBackupSuffix(uiadv->edtBackupSuffix->text());
 
@@ -1021,12 +1023,11 @@ void KateSaveConfigTab::reload()
     ui->chkNewLineAtEof->setChecked(KateDocumentConfig::global()->newLineAtEof());
 
     // other stuff
-    uint f(KateDocumentConfig::global()->backupFlags());
-    uiadv->chkBackupLocalFiles->setChecked(f & KateDocumentConfig::LocalFiles);
-    uiadv->chkBackupRemoteFiles->setChecked(f & KateDocumentConfig::RemoteFiles);
+    uiadv->chkBackupLocalFiles->setChecked(KateDocumentConfig::global()->backupOnSaveLocal());
+    uiadv->chkBackupRemoteFiles->setChecked(KateDocumentConfig::global()->backupOnSaveRemote());
     uiadv->edtBackupPrefix->setText(KateDocumentConfig::global()->backupPrefix());
     uiadv->edtBackupSuffix->setText(KateDocumentConfig::global()->backupSuffix());
-    uiadv->cmbSwapFileMode->setCurrentIndex(KateDocumentConfig::global()->swapFileModeRaw());
+    uiadv->cmbSwapFileMode->setCurrentIndex(KateDocumentConfig::global()->swapFileMode());
     uiadv->kurlSwapDirectory->setUrl(QUrl::fromLocalFile(KateDocumentConfig::global()->swapDirectory()));
     uiadv->spbSwapFileSync->setValue(KateDocumentConfig::global()->swapSyncInterval());
     swapFileModeChanged(KateDocumentConfig::global()->swapFileMode());
@@ -1070,172 +1071,6 @@ QIcon KateSaveConfigTab::icon() const
 
 //END KateSaveConfigTab
 
-//BEGIN KateHlDownloadDialog
-KateHlDownloadDialog::KateHlDownloadDialog(QWidget *parent, const char *name, bool modal)
-    : QDialog(parent)
-{
-    setWindowTitle(i18n("Highlight Download"));
-    setObjectName(QString::fromUtf8(name));
-    setModal(modal);
-
-    QVBoxLayout *mainLayout = new QVBoxLayout;
-    setLayout(mainLayout);
-
-    QLabel *label = new QLabel(i18n("Select the syntax highlighting files you want to update:"), this);
-    mainLayout->addWidget(label);
-
-    list = new QTreeWidget(this);
-    list->setColumnCount(4);
-    list->setHeaderLabels({ QString(), i18n("Name"), i18n("Installed"), i18n("Latest") });
-    list->setSelectionMode(QAbstractItemView::MultiSelection);
-    list->setAllColumnsShowFocus(true);
-    list->setRootIsDecorated(false);
-    list->setColumnWidth(0, 22);
-    mainLayout->addWidget(list);
-
-    label = new QLabel(i18n("<b>Note:</b> New versions are selected automatically."), this);
-    mainLayout->addWidget(label);
-
-    // buttons
-    QDialogButtonBox *buttons = new QDialogButtonBox(this);
-    mainLayout->addWidget(buttons);
-
-    m_installButton = new QPushButton(QIcon::fromTheme(QStringLiteral("dialog-ok")), i18n("&Install"));
-    m_installButton->setDefault(true);
-    buttons->addButton(m_installButton, QDialogButtonBox::AcceptRole);
-    connect(m_installButton, SIGNAL(clicked()), this, SLOT(slotInstall()));
-
-    QPushButton *closeButton = new QPushButton;
-    KGuiItem::assign(closeButton, KStandardGuiItem::cancel());
-    buttons->addButton(closeButton, QDialogButtonBox::RejectRole);
-    connect(closeButton, SIGNAL(clicked()), this, SLOT(reject()));
-
-    transferJob = KIO::get(QUrl(QStringLiteral("%1update-%2.%3.xml").arg(HLDOWNLOADPATH).arg(KTEXTEDITOR_VERSION_MAJOR).arg(KTEXTEDITOR_VERSION_MINOR)), KIO::Reload);
-    connect(transferJob, SIGNAL(data(KIO::Job*,QByteArray)),
-            this, SLOT(listDataReceived(KIO::Job*,QByteArray)));
-//        void data( KIO::Job *, const QByteArray &data);
-
-    resize(450, 400);
-}
-
-KateHlDownloadDialog::~KateHlDownloadDialog() {}
-
-/// Split typical version string (\c major.minor.patch) into
-/// numeric components, convert 'em to \c unsigned and form a
-/// single value that can be compared w/ other versions
-/// using relation operators.
-/// \note It takes into account only first 3 numbers
-unsigned KateHlDownloadDialog::parseVersion(const QString &version_string)
-{
-    unsigned vn[3] = {0, 0, 0};
-    unsigned idx = 0;
-    foreach (const QString &n, version_string.split(QLatin1Char('.'))) {
-        vn[idx++] = n.toUInt();
-        if (idx == sizeof(vn)) {
-            break;
-        }
-    }
-    return (((vn[0]) << 16) | ((vn[1]) << 8) | (vn[2]));
-}
-
-void KateHlDownloadDialog::listDataReceived(KIO::Job *, const QByteArray &data)
-{
-    if (!transferJob || transferJob->isErrorPage()) {
-        m_installButton->setEnabled(false);
-        if (data.size() == 0) {
-            KMessageBox::error(this, i18n("The list of highlightings could not be found on / retrieved from the server"));
-        }
-        return;
-    }
-
-    listData += QLatin1String(data);
-    qCDebug(LOG_KTE) << QStringLiteral("CurrentListData: ") << listData;
-    qCDebug(LOG_KTE) << QStringLiteral("Data length: %1").arg(data.size());
-    qCDebug(LOG_KTE) << QStringLiteral("listData length: %1").arg(listData.length());
-    if (data.size() == 0) {
-        if (listData.length() > 0) {
-            QString installedVersion;
-            KateHlManager *hlm = KateHlManager::self();
-            QDomDocument doc;
-            doc.setContent(listData);
-            QDomElement DocElem = doc.documentElement();
-            QDomNode n = DocElem.firstChild();
-            KateHighlighting *hl = nullptr;
-
-            if (n.isNull()) {
-                qCDebug(LOG_KTE) << QStringLiteral("There is no usable childnode");
-            }
-            while (!n.isNull()) {
-                installedVersion = QStringLiteral("    --");
-
-                QDomElement e = n.toElement();
-                if (!e.isNull()) {
-                    qCDebug(LOG_KTE) << QStringLiteral("NAME: ") << e.tagName() << QStringLiteral(" - ") << e.attribute(QStringLiteral("name"));
-                }
-                n = n.nextSibling();
-
-                QString Name = e.attribute(QStringLiteral("name"));
-
-                for (int i = 0; i < hlm->highlights(); i++) {
-                    hl = hlm->getHl(i);
-                    if (hl && hl->name() == Name) {
-                        installedVersion = QLatin1String("    ") + hl->version();
-                        break;
-                    } else {
-                        hl = nullptr;
-                    }
-                }
-
-                // autoselect entry if new or updated.
-                QTreeWidgetItem *entry = new QTreeWidgetItem(list);
-                entry->setText(0, QString());
-                entry->setText(1, e.attribute(QStringLiteral("name")));
-                entry->setText(2, installedVersion);
-                entry->setText(3, e.attribute(QStringLiteral("version")));
-                entry->setText(4, e.attribute(QStringLiteral("url")));
-
-                bool is_fresh = false;
-                if (hl) {
-                    unsigned prev_version = parseVersion(hl->version());
-                    unsigned next_version = parseVersion(e.attribute(QStringLiteral("version")));
-                    is_fresh = prev_version < next_version;
-                } else {
-                    is_fresh = true;
-                }
-                if (is_fresh) {
-                    entry->treeWidget()->setItemSelected(entry, true);
-                    entry->setIcon(0, QIcon::fromTheme((QStringLiteral("get-hot-new-stuff"))));
-                }
-            }
-            list->resizeColumnToContents(1);
-            list->sortItems(1, Qt::AscendingOrder);
-        }
-    }
-}
-
-void KateHlDownloadDialog::slotInstall()
-{
-    const QString destdir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QLatin1String("/org.kde.syntax-highlighting/syntax/");
-    QDir(destdir).mkpath(QStringLiteral(".")); // make sure the dir is there
-
-    foreach (QTreeWidgetItem *it, list->selectedItems()) {
-        QUrl src(it->text(4));
-        QString filename = src.fileName();
-
-        // if there is no fileName construct at least something
-        if (filename.isEmpty()) {
-            filename = src.path().replace(QLatin1Char('/'), QLatin1Char('_'));
-        }
-
-        QUrl dest = QUrl::fromLocalFile(destdir + filename);
-
-        KIO::FileCopyJob *job = KIO::file_copy(src, dest);
-        KJobWidgets::setWindow(job, this);
-        job->exec();
-    }
-}
-//END KateHlDownloadDialog
-
 //BEGIN KateGotoBar
 KateGotoBar::KateGotoBar(KTextEditor::View *view, QWidget *parent)
     : KateViewBarWidget(true, parent)
@@ -1244,37 +1079,119 @@ KateGotoBar::KateGotoBar(KTextEditor::View *view, QWidget *parent)
     Q_ASSERT(m_view != nullptr);    // this bar widget is pointless w/o a view
 
     QHBoxLayout *topLayout = new QHBoxLayout(centralWidget());
-    topLayout->setMargin(0);
-    gotoRange = new QSpinBox(centralWidget());
+    topLayout->setContentsMargins(0, 0, 0, 0);
 
-    QLabel *label = new QLabel(i18n("&Go to line:"), centralWidget());
-    label->setBuddy(gotoRange);
+    QToolButton *btn = new QToolButton(this);
+    btn->setAutoRaise(true);
+    btn->setMinimumSize(QSize(1, btn->minimumSizeHint().height()));
+    btn->setText(i18n("&Line:"));
+    btn->setToolTip(i18n("Go to line number from clipboard"));
+    connect(btn, &QToolButton::clicked, this, &KateGotoBar::gotoClipboard);
+    topLayout->addWidget(btn);
 
-    QToolButton *btnOK = new QToolButton(centralWidget());
-    btnOK->setAutoRaise(true);
-    btnOK->setIcon(QIcon::fromTheme(QStringLiteral("go-jump")));
-    btnOK->setText(i18n("Go"));
-    btnOK->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    connect(btnOK, SIGNAL(clicked()), this, SLOT(gotoLine()));
+    m_gotoRange = new QSpinBox(this);
+    m_gotoRange->setMinimum(1);
+    topLayout->addWidget(m_gotoRange, 1);
+    topLayout->setStretchFactor(m_gotoRange, 0);
 
-    topLayout->addWidget(label);
-    topLayout->addWidget(gotoRange, 1);
-    topLayout->setStretchFactor(gotoRange, 0);
-    topLayout->addWidget(btnOK);
+    btn = new QToolButton(this);
+    btn->setAutoRaise(true);
+    btn->setMinimumSize(QSize(1, btn->minimumSizeHint().height()));
+    btn->setText(i18n("Go to"));
+    btn->setIcon(QIcon::fromTheme(QStringLiteral("go-jump")));
+    btn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    connect(btn, &QToolButton::clicked, this, &KateGotoBar::gotoLine);
+    topLayout->addWidget(btn);
+
+    btn = m_modifiedUp = new QToolButton(this);
+    btn->setAutoRaise(true);
+    btn->setMinimumSize(QSize(1, btn->minimumSizeHint().height()));
+    btn->setDefaultAction(m_view->action("modified_line_up"));
+    btn->setIcon(QIcon::fromTheme(QStringLiteral("go-up-search")));
+    btn->setText(QString());
+    btn->installEventFilter(this);
+    topLayout->addWidget(btn);
+
+    btn = m_modifiedDown = new QToolButton(this);
+    btn->setAutoRaise(true);
+    btn->setMinimumSize(QSize(1, btn->minimumSizeHint().height()));
+    btn->setDefaultAction(m_view->action("modified_line_down"));
+    btn->setIcon(QIcon::fromTheme(QStringLiteral("go-down-search")));
+    btn->setText(QString());
+    btn->installEventFilter(this);
+    topLayout->addWidget(btn);
+
     topLayout->addStretch();
 
-    setFocusProxy(gotoRange);
+    setFocusProxy(m_gotoRange);
+}
+
+void KateGotoBar::showEvent(QShowEvent *event)
+{
+    Q_UNUSED(event)
+    // Catch rare cases where the bar is visible while document is edited
+    connect(m_view->document(), &KTextEditor::Document::textChanged, this, &KateGotoBar::updateData);
+}
+
+void KateGotoBar::closed()
+{
+    disconnect(m_view->document(), &KTextEditor::Document::textChanged, this, &KateGotoBar::updateData);
+}
+
+bool KateGotoBar::eventFilter(QObject *object, QEvent *event)
+{
+    if (object == m_modifiedUp || object == m_modifiedDown) {
+        if (event->type() != QEvent::Wheel) {
+            return false;
+        }
+
+        int delta = static_cast<QWheelEvent *>(event)->delta();
+        // Reset m_wheelDelta when scroll direction change
+        if (m_wheelDelta != 0 && (m_wheelDelta < 0) != (delta < 0)) {
+            m_wheelDelta = 0;
+        }
+
+        m_wheelDelta += delta;
+
+        if (m_wheelDelta >= 120) {
+            m_wheelDelta = 0;
+            m_modifiedUp->click();
+        } else if (m_wheelDelta <= -120) {
+            m_wheelDelta = 0;
+            m_modifiedDown->click();
+        }
+    }
+
+    return false;
+}
+
+void KateGotoBar::gotoClipboard()
+{
+    QRegularExpression rx(QStringLiteral("\\d+"));
+    int lineNo = rx.match(QApplication::clipboard()->text(QClipboard::Selection)).captured().toInt();
+    if (lineNo <= m_gotoRange->maximum() && lineNo >= 1) {
+        m_gotoRange->setValue(lineNo);
+        gotoLine();
+    } else {
+        QPointer<KTextEditor::Message> message = new KTextEditor::Message(
+            i18n("No valid line number found in clipboard"));
+        message->setWordWrap(true);
+        message->setAutoHide(2000);
+        message->setPosition(KTextEditor::Message::BottomInView);
+        message->setView(m_view),
+        m_view->document()->postMessage(message);
+    }
 }
 
 void KateGotoBar::updateData()
 {
-    gotoRange->setMaximum(m_view->document()->lines());
+    m_gotoRange->setMaximum(m_view->document()->lines());
     if (!isVisible()) {
-        gotoRange->setValue(m_view->cursorPosition().line() + 1);
-        gotoRange->adjustSize(); // ### does not respect the range :-(
+        m_gotoRange->setValue(m_view->cursorPosition().line() + 1);
+        m_gotoRange->adjustSize(); // ### does not respect the range :-(
     }
-    gotoRange->setFocus(Qt::OtherFocusReason);
-    gotoRange->selectAll();
+
+    m_gotoRange->selectAll();
 }
 
 void KateGotoBar::keyPressEvent(QKeyEvent *event)
@@ -1294,7 +1211,7 @@ void KateGotoBar::gotoLine()
         kv->clearSelection();
     }
 
-    m_view->setCursorPosition(KTextEditor::Cursor(gotoRange->value() - 1, 0));
+    m_view->setCursorPosition(KTextEditor::Cursor(m_gotoRange->value() - 1, 0));
     m_view->setFocus();
     emit hideMe();
 }
@@ -1308,7 +1225,7 @@ KateDictionaryBar::KateDictionaryBar(KTextEditor::ViewPrivate *view, QWidget *pa
     Q_ASSERT(m_view != nullptr); // this bar widget is pointless w/o a view
 
     QHBoxLayout *topLayout = new QHBoxLayout(centralWidget());
-    topLayout->setMargin(0);
+    topLayout->setContentsMargins(0, 0, 0, 0);
     //topLayout->setSpacing(spacingHint());
     m_dictionaryComboBox = new Sonnet::DictionaryComboBox(centralWidget());
     connect(m_dictionaryComboBox, SIGNAL(dictionaryChanged(QString)),

@@ -24,6 +24,7 @@
 
 #include <ktexteditor/view.h>
 #include <ktexteditor/texthintinterface.h>
+#include <ktexteditor/inlinenoteinterface.h>
 #include <ktexteditor/markinterface.h>
 #include <ktexteditor/codecompletioninterface.h>
 #include <ktexteditor/configinterface.h>
@@ -51,6 +52,7 @@ namespace KTextEditor
 {
 class AnnotationModel;
 class Message;
+class InlineNoteProvider;
 }
 
 namespace KTextEditor { class DocumentPrivate; }
@@ -73,6 +75,7 @@ class KateModeMenu;
 class KateAbstractInputMode;
 class KateScriptActionMenu;
 class KateMessageLayout;
+class KateInlineNoteData;
 
 class KToggleAction;
 class KSelectAction;
@@ -89,13 +92,16 @@ class KTEXTEDITOR_EXPORT ViewPrivate : public KTextEditor::View,
     public KTextEditor::TextHintInterface,
     public KTextEditor::CodeCompletionInterface,
     public KTextEditor::ConfigInterface,
-    public KTextEditor::AnnotationViewInterface
+    public KTextEditor::InlineNoteInterface,
+    public KTextEditor::AnnotationViewInterfaceV2
 {
     Q_OBJECT
     Q_INTERFACES(KTextEditor::TextHintInterface)
     Q_INTERFACES(KTextEditor::ConfigInterface)
     Q_INTERFACES(KTextEditor::CodeCompletionInterface)
     Q_INTERFACES(KTextEditor::AnnotationViewInterface)
+    Q_INTERFACES(KTextEditor::AnnotationViewInterfaceV2)
+    Q_INTERFACES(KTextEditor::InlineNoteInterface)
 
     friend class KTextEditor::View;
     friend class ::KateViewInternal;
@@ -144,7 +150,8 @@ public Q_SLOTS:
 
 private Q_SLOTS:
     /**
-     * internal use, apply word wrap
+     * Wrap lines touched by the selection with respect of existing paragraphs.
+     * Work is done by KTextEditor::DocumentPrivate::wrapParagraph
      */
     void applyWordWrap();
 
@@ -268,6 +275,23 @@ public:
     }
 
     //
+    // Inline Notes Interface
+    //
+public:
+    void registerInlineNoteProvider(KTextEditor::InlineNoteProvider *provider) override;
+    void unregisterInlineNoteProvider(KTextEditor::InlineNoteProvider *provider) override;
+    QRect inlineNoteRect(const KateInlineNoteData& note) const;
+
+    QVarLengthArray<KateInlineNoteData, 8> inlineNotes(int line) const;
+
+private:
+    QVector<KTextEditor::InlineNoteProvider *> m_inlineNoteProviders;
+
+private Q_SLOTS:
+    void inlineNotesReset();
+    void inlineNotesLineChanged(int line);
+
+    //
     // KTextEditor::SelectionInterface stuff
     //
 public Q_SLOTS:
@@ -389,6 +413,10 @@ public:
     KTextEditor::AnnotationModel *annotationModel() const override;
     void setAnnotationBorderVisible(bool visible) override;
     bool isAnnotationBorderVisible() const override;
+    void setAnnotationItemDelegate(KTextEditor::AbstractAnnotationItemDelegate *delegate) override;
+    KTextEditor::AbstractAnnotationItemDelegate* annotationItemDelegate() const override;
+    void setAnnotationUniformItemSizes(bool enable) override;
+    bool uniformAnnotationItemSizes() const override;
 
 Q_SIGNALS:
     void annotationContextMenuAboutToShow(KTextEditor::View *view, QMenu *menu, int line) override;
@@ -460,35 +488,80 @@ public Q_SLOTS:
     void goToPreviousEditingPosition();
 
     /**
-     * Sets the cursor to the next editing position in this document
+     * Sets the cursor to the next editing position in this document.
      */
     void goToNextEditingPosition();
 
     /**
-      Uppercases selected text, or an alphabetic character next to the cursor.
-    */
+     * Uppercases selected text, or an alphabetic character next to the cursor.
+     */
     void uppercase();
+
     /**
-      Lowercases selected text, or an alphabetic character next to the cursor.
-    */
+     * Lowercases selected text, or an alphabetic character next to the cursor.
+     */
     void lowercase();
+
     /**
-      Capitalizes the selection (makes each word start with an uppercase) or
-      the word under the cursor.
-    */
+     * Capitalizes the selection (makes each word start with an uppercase) or
+     * the word under the cursor.
+     */
     void capitalize();
+
     /**
-      Joins lines touched by the selection
-    */
+     * Joins lines touched by the selection.
+     */
     void joinLines();
 
-    // Note - the following functions simply forward to KateViewInternal
+    /**
+     * Performs a line break (insert a new line char) at current cursor position
+     * and indent the new line.
+     *
+     * Most work is done by @c KTextEditor::DocumentPrivate::newLine and
+     * @c KateAutoIndent::userTypedChar
+     * @see KTextEditor::DocumentPrivate::newLine, KateAutoIndent
+     */
     void keyReturn();
+
+    /**
+     * Performs a line break (insert a new line char) at current cursor position
+     * but keep all leading non word char as indent for the new line.
+     */
     void smartNewline();
+
+    /**
+     * Insert a tabulator char at current cursor position.
+     */
     void backspace();
+
+    /**
+     * Remove the word left from the current cursor position including all leading
+     * space.
+     * @see KateViewInternal::wordPrev
+     */
     void deleteWordLeft();
+
+    /**
+     * Remove the current selection. When nothing is selected the char right
+     * from the current cursor position is removed.
+     * @see KTextEditor::DocumentPrivate::del
+     */
     void keyDelete();
+
+    /**
+     * When the char right from the current cursor position is a space is all
+     * space to the right removed. Otherwise is the word to the right including
+     * all trialling space removed.
+     * @see KateViewInternal::wordNext
+     */
     void deleteWordRight();
+
+    /**
+     * Transpose the characters left and right from the current cursor position
+     * and move the cursor one position to the right. If the char right to the
+     * current cursor position is a new line char, nothing is done.
+     * @see KTextEditor::DocumentPrivate::transpose
+     */
     void transpose();
     void cursorLeft();
     void shiftCursorLeft();
@@ -524,6 +597,9 @@ public Q_SLOTS:
     void shiftToMatchingBracket();
     void toPrevModifiedLine();
     void toNextModifiedLine();
+    /**
+     * Insert a tabulator char at current cursor position.
+     */
     void insertTab();
 
     void gotoLine();
@@ -853,6 +929,12 @@ Q_SIGNALS:
      * Delayed update for view after text ranges changed
      */
     void delayedUpdateOfView();
+
+    /**
+     * Emitted whenever the caret enter or leave a range.
+     * ATM only used by KateStatusBar to update the dict button
+     */
+    void caretChangedRange(KTextEditor::View *);
 
 public:
     /**

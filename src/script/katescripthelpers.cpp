@@ -1,6 +1,6 @@
 /* This file is part of the KDE libraries
  *
- * Copyright (C) 2010 Dominik Haumann <dhaumann kde org>
+ * Copyright (C) 2010-2018 Dominik Haumann <dhaumann@kde.org>
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -157,8 +157,10 @@ void ScriptHelper::require(const QString &file)
          * eval in current script engine
          */
         QJSValue val = m_engine->evaluate(code, fullName);
-        if (val.isError())
-            qWarning() << "error evaluating" << fullName << val.toString();
+        if (val.isError()) {
+            qWarning() << "error evaluating" << fullName << val.toString() << ", at line" << val.property(QStringLiteral("lineNumber")).toInt();
+        }
+
 
         /**
          * set include guard

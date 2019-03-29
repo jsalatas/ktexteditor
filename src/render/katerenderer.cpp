@@ -30,9 +30,14 @@
 #include "katerenderrange.h"
 #include "katetextlayout.h"
 #include "katebuffer.h"
+#include "inlinenotedata.h"
+
+#include "ktexteditor/inlinenote.h"
+#include "ktexteditor/inlinenoteprovider.h"
 
 #include "katepartdebug.h"
 
+#include <QFont>
 #include <QPainter>
 #include <QTextLine>
 #include <QStack>
@@ -54,7 +59,7 @@ KateRenderer::KateRenderer(KTextEditor::DocumentPrivate *doc, Kate::TextFolding 
     , m_drawCaret(true)
     , m_showSelections(true)
     , m_showTabs(true)
-    , m_showSpaces(true)
+    , m_showSpaces(KateDocumentConfig::Trailing)
     , m_showNonPrintableSpaces(false)
     , m_printerFriendly(false)
     , m_config(new KateRendererConfig(this))
@@ -111,7 +116,7 @@ void KateRenderer::setShowTabs(bool showTabs)
     m_showTabs = showTabs;
 }
 
-void KateRenderer::setShowTrailingSpaces(bool showSpaces)
+void KateRenderer::setShowSpaces(KateDocumentConfig::WhitespaceRendering showSpaces)
 {
     m_showSpaces = showSpaces;
 }
@@ -174,7 +179,7 @@ void KateRenderer::setPrinterFriendly(bool printerFriendly)
 {
     m_printerFriendly = printerFriendly;
     setShowTabs(false);
-    setShowTrailingSpaces(false);
+    setShowSpaces(KateDocumentConfig::None);
     setShowSelections(false);
     setDrawCaret(false);
 }
@@ -266,7 +271,7 @@ void KateRenderer::paintTabstop(QPainter &paint, qreal x, qreal y)
     paint.setPen(penBackup);
 }
 
-void KateRenderer::paintTrailingSpace(QPainter &paint, qreal x, qreal y)
+void KateRenderer::paintSpace(QPainter &paint, qreal x, qreal y)
 {
     QPen penBackup(paint.pen());
     QPen pen(config()->tabMarkerColor());
@@ -375,9 +380,9 @@ static bool rangeLessThanForRenderer(const Kate::TextRange *a, const Kate::TextR
     return false;
 }
 
-QList<QTextLayout::FormatRange> KateRenderer::decorationsForLine(const Kate::TextLine &textLine, int line, bool selectionsOnly, KateRenderRange *completionHighlight, bool completionSelected) const
+QVector<QTextLayout::FormatRange> KateRenderer::decorationsForLine(const Kate::TextLine &textLine, int line, bool selectionsOnly, KateRenderRange *completionHighlight, bool completionSelected) const
 {
-    QList<QTextLayout::FormatRange> newHighlight;
+    QVector<QTextLayout::FormatRange> newHighlight;
 
 //     qDebug() << "paint line:" << line << "selection ranges:" << m_view->selections()->selections();
 
@@ -402,7 +407,7 @@ QList<QTextLayout::FormatRange> KateRenderer::decorationsForLine(const Kate::Tex
             bool anyDynamicHlsActive = m_view && (!rangesMouseIn->empty() || !rangesCaretIn->empty());
 
             // sort all ranges, we want that the most specific ranges win during rendering, multiple equal ranges are kind of random, still better than old smart rangs behavior ;)
-            qSort(rangesWithAttributes.begin(), rangesWithAttributes.end(), rangeLessThanForRenderer);
+            std::sort(rangesWithAttributes.begin(), rangesWithAttributes.end(), rangeLessThanForRenderer);
 
             // loop over all ranges
             for (int i = 0; i < rangesWithAttributes.size(); ++i) {
@@ -439,6 +444,7 @@ QList<QTextLayout::FormatRange> KateRenderer::decorationsForLine(const Kate::Tex
 
         // Add selection highlighting if we're creating the selection decorations
         if ((m_view && selectionsOnly && showSelections() && m_view->selection()) || (completionHighlight && completionSelected) || (m_view && m_view->blockSelection())) {
+            NormalRenderRange *selectionHighlight = new NormalRenderRange();
 
             // Set up the selection background attribute TODO: move this elsewhere, eg. into the config?
             static KTextEditor::Attribute::Ptr backgroundAttribute;
@@ -451,13 +457,9 @@ QList<QTextLayout::FormatRange> KateRenderer::decorationsForLine(const Kate::Tex
 
             // Create ranges for the current selection
             if (completionHighlight && completionSelected) {
-                auto selectionHighlight = new NormalRenderRange();
                 selectionHighlight->addRange(new KTextEditor::Range(line, 0, line + 1, 0), backgroundAttribute);
-                renderRanges.append(selectionHighlight);
             } else if (m_view->blockSelection() && m_view->selections()->overlapsLine(line)) {
-                auto selectionHighlight = new NormalRenderRange();
                 selectionHighlight->addRange(new KTextEditor::Range(m_doc->rangeOnLine(m_view->selectionRange(), line)), backgroundAttribute);
-                renderRanges.append(selectionHighlight);
             } else {
                 auto s = m_view->selections()->selections();
                 Q_FOREACH ( const auto& range, s ) {
@@ -468,11 +470,10 @@ QList<QTextLayout::FormatRange> KateRenderer::decorationsForLine(const Kate::Tex
                     auto start = qMax(range.start(), KTextEditor::Cursor(line, 0));
                     auto end = qMin(range.end(), KTextEditor::Cursor(line, textLine->length()));
 //                     qDebug() << "adding highlight range:" << start << end << "for line" << line;
-                    auto selectionHighlight = new NormalRenderRange();
                     selectionHighlight->addRange(new KTextEditor::Range(start, end), backgroundAttribute);
-                    renderRanges.append(selectionHighlight);
                 }
             }
+            renderRanges.append(selectionHighlight);
         }
 
         KTextEditor::Cursor currentPosition, endPosition;
@@ -484,10 +485,10 @@ QList<QTextLayout::FormatRange> KateRenderer::decorationsForLine(const Kate::Tex
                 currentPosition = subRange.start();
                 endPosition = subRange.end();
             } else {
-                KTextEditor::Range rangeNeeded = KTextEditor::Range(line, 0, line + 1, 0);
+                KTextEditor::Range rangeNeeded = m_view->selectionRange() & KTextEditor::Range(line, 0, line + 1, 0);
 
-                currentPosition = rangeNeeded.start();
-                endPosition = rangeNeeded.end();
+                currentPosition = qMax(KTextEditor::Cursor(line, 0), rangeNeeded.start());
+                endPosition = qMin(KTextEditor::Cursor(line + 1, 0), rangeNeeded.end());
             }
         } else {
             currentPosition = KTextEditor::Cursor(line, 0);
@@ -525,9 +526,9 @@ QList<QTextLayout::FormatRange> KateRenderer::decorationsForLine(const Kate::Tex
                 fr.format = *a;
 
 #warning fixme, no idea how this should work. halp
-//                 if (selectionsOnly) {
-//                     assignSelectionBrushesFromAttribute(fr, *a);
-//                 }
+                if (selectionsOnly) {
+                    assignSelectionBrushesFromAttribute(fr, *a);
+                }
             }
 
             newHighlight.append(fr);
@@ -557,11 +558,6 @@ void KateRenderer::assignSelectionBrushesFromAttribute(QTextLayout::FormatRange 
     }
 }
 
-/*
-The ultimate line painting function.
-Currently missing features:
-- draw indent lines
-*/
 void KateRenderer::paintTextLine(QPainter &paint, KateLineLayoutPtr range, int xStart, int xEnd, const KTextEditor::Cursor *cursor, PaintTextLineFlags flags)
 {
     Q_ASSERT(range->isValid());
@@ -593,6 +589,11 @@ void KateRenderer::paintTextLine(QPainter &paint, KateLineLayoutPtr range, int x
                     int selectionEndX = cursorToX(lastLine, selectionEndColumn, true);
                     paint.fillRect(QRect(selectionStartX - xStart, (int)lastLine.lineLayout().y(), selectionEndX - selectionStartX, lineHeight()), selectionBrush);
                 }
+            } else {
+                const int selectStickWidth = 2;
+                KateTextLayout selectionLine = range->viewLine(range->viewLineForColumn(selectionStartColumn));
+                int selectionX = cursorToX(selectionLine, selectionStartColumn, true);
+                paint.fillRect(QRect(selectionX - xStart, (int)selectionLine.lineLayout().y(), selectStickWidth, lineHeight()), selectionBrush);
             }
         }
 
@@ -604,12 +605,7 @@ void KateRenderer::paintTextLine(QPainter &paint, KateLineLayoutPtr range, int x
             paint.setPen(attribute(KTextEditor::dsNormal)->foreground().color());
             // Draw the text :)
             if (drawSelection) {
-                // FIXME toVector() may be a performance issue
-                additionalFormats = decorationsForLine(range->textLine(), range->line(), true).toVector();
-//                 qDebug() << "selection formats:" << additionalFormats.size();
-//                 Q_FOREACH ( const auto& fmt, additionalFormats ) {
-//                     qDebug() << fmt.start << fmt.length << fmt.format;
-//                 }
+                additionalFormats = decorationsForLine(range->textLine(), range->line(), true);
                 range->layout()->draw(&paint, QPoint(-xStart, 0), additionalFormats);
 
             } else {
@@ -694,14 +690,15 @@ void KateRenderer::paintTextLine(QPainter &paint, KateLineLayoutPtr range, int x
                         paint.fillRect(area, drawBrush);
                     }
                 }
-            }
-            // Draw indent lines
-            if (showIndentLines() && i == 0) {
-                const qreal w = spaceWidth();
-                const int lastIndentColumn = range->textLine()->indentDepth(m_tabWidth);
 
-                for (int x = m_indentWidth; x < lastIndentColumn; x += m_indentWidth) {
-                    paintIndentMarker(paint, x * w + 1 - xStart, range->line());
+                // Draw indent lines
+                if (showIndentLines() && i == 0) {
+                    const qreal w = spaceWidth();
+                    const int lastIndentColumn = range->textLine()->indentDepth(m_tabWidth);
+
+                    for (int x = m_indentWidth; x < lastIndentColumn; x += m_indentWidth) {
+                        paintIndentMarker(paint, x * w + 1 - xStart, range->line());
+                    }
                 }
             }
 
@@ -733,22 +730,26 @@ void KateRenderer::paintTextLine(QPainter &paint, KateLineLayoutPtr range, int x
             }
 
             // draw trailing spaces
-            if (showTrailingSpaces()) {
+            if (showSpaces() != KateDocumentConfig::None) {
                 int spaceIndex = line.endCol() - 1;
-                int trailingPos = range->textLine()->lastChar();
-                if (trailingPos < 0) {
-                    trailingPos = 0;
-                }
+                const int trailingPos = showSpaces() == KateDocumentConfig::All ? 0 : qMax(range->textLine()->lastChar(), 0);
+
                 if (spaceIndex >= trailingPos) {
-                    while (spaceIndex >= line.startCol() && text.at(spaceIndex).isSpace()) {
+                    for (; spaceIndex >= line.startCol(); --spaceIndex) {
+                        if (!text.at(spaceIndex).isSpace()) {
+                            if (showSpaces() == KateDocumentConfig::Trailing)
+                                break;
+                            else
+                                continue;
+                        }
+
                         if (text.at(spaceIndex) != QLatin1Char('\t') || !showTabs()) {
                             if (range->layout()->textOption().alignment() == Qt::AlignRight) { // Draw on left for RTL lines
-                                paintTrailingSpace(paint, line.lineLayout().cursorToX(spaceIndex) - xStart - spaceWidth() / 2.0, y);
+                                paintSpace(paint, line.lineLayout().cursorToX(spaceIndex) - xStart - spaceWidth() / 2.0, y);
                             } else {
-                                paintTrailingSpace(paint, line.lineLayout().cursorToX(spaceIndex) - xStart + spaceWidth() / 2.0, y);
+                                paintSpace(paint, line.lineLayout().cursorToX(spaceIndex) - xStart + spaceWidth() / 2.0, y);
                             }
                         }
-                        --spaceIndex;
                     }
                 }
             }
@@ -769,6 +770,39 @@ void KateRenderer::paintTextLine(QPainter &paint, KateLineLayoutPtr range, int x
 
                     paintNonPrintableSpaces(paint, x - xStart, y, text[charIndex]);
                 }
+            }
+        }
+
+        // Draw inline notes
+        if (!isPrinterFriendly()) {
+            const auto inlineNotes = m_view->inlineNotes(range->line());
+            for (const auto& inlineNoteData: inlineNotes) {
+                KTextEditor::InlineNote inlineNote(inlineNoteData);
+                const int column = inlineNote.position().column();
+                int viewLine = range->viewLineForColumn(column);
+
+                // Determine the position where to paint the note.
+                // We start by getting the x coordinate of cursor placed to the column.
+                qreal x = range->viewLine(viewLine).lineLayout().cursorToX(column) - xStart;
+                int textLength = range->length();
+                if (column == 0 || column < textLength) {
+                    // If the note is inside text or at the beginning, then there is a hole in the text where the
+                    // note should be painted and the cursor gets placed at the right side of it. So we have to
+                    // subtract the width of the note to get to left side of the hole.
+                    x -= inlineNote.width();
+                } else {
+                    // If the note is outside the text, then the X coordinate is located at the end of the line.
+                    // Add appropriate amount of spaces to reach the required column.
+                    x += spaceWidth() * (column - textLength);
+                }
+
+                qreal y = lineHeight() * viewLine;
+
+                // Paint the note
+                paint.save();
+                paint.translate(x, y);
+                inlineNote.provider()->paintInlineNote(inlineNote, paint);
+                paint.restore();
             }
         }
 
@@ -919,7 +953,7 @@ int KateRenderer::lineHeight() const
 
 void KateRenderer::updateConfig()
 {
-    // update the attibute list pointer
+    // update the attribute list pointer
     updateAttributes();
 
     // update font height, do this before we update the view!
@@ -933,9 +967,21 @@ void KateRenderer::updateConfig()
 
 void KateRenderer::updateFontHeight()
 {
-    // ensure minimal height of one pixel to not fall in the div by 0 trap somewhere
-    // use font line spacing, this includes the leading
-    m_fontHeight = qMax(1, qCeil(config()->fontMetrics().lineSpacing()));
+    /**
+     * ensure minimal height of one pixel to not fall in the div by 0 trap somewhere
+     *
+     * use a line spacing that matches the code in qt to layout/paint text
+     *
+     * see bug 403868
+     * https://github.com/qt/qtbase/blob/5.12/src/gui/text/qtextlayout.cpp (line 2270 at the moment) where the text height is set as:
+     *
+     * qreal height = maxY + fontHeight - minY;
+     *
+     * with fontHeight:
+     *
+     * qreal fontHeight = font.ascent() + font.descent();
+     */
+    m_fontHeight = qMax(1, qCeil(config()->fontMetrics().ascent() + config()->fontMetrics().descent()));
 }
 
 void KateRenderer::updateMarkerSize()
@@ -994,7 +1040,31 @@ void KateRenderer::layoutLine(KateLineLayoutPtr lineLayout, int maxwidth, bool c
     l->setTextOption(opt);
 
     // Syntax highlighting, inbuilt and arbitrary
-    l->setAdditionalFormats(decorationsForLine(textLine, lineLayout->line()));
+    QVector<QTextLayout::FormatRange> decorations = decorationsForLine(textLine, lineLayout->line());
+
+    int firstLineOffset = 0;
+
+    if (!isPrinterFriendly()) {
+        const auto inlineNotes = m_view->inlineNotes(lineLayout->line());
+        for (const KTextEditor::InlineNote& inlineNote: inlineNotes) {
+            const int column = inlineNote.position().column();
+            int width = inlineNote.width();
+
+            // Make space for every inline note.
+            // If it is on column 0 (at the beginning of the line), we must offset the first line.
+            // If it is inside the text, we use absolute letter spacing to create space for it between the two letters.
+            // If it is outside of the text, we don't have to make space for it.
+            if (column == 0) {
+                firstLineOffset = width;
+            } else if (column < l->text().length()) {
+                QTextCharFormat text_char_format;
+                text_char_format.setFontLetterSpacing(width);
+                text_char_format.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+                decorations.append(QTextLayout::FormatRange { column - 1, 1, text_char_format });
+            }
+        }
+    }
+    l->setFormats(decorations);
 
     // Begin layouting
     l->beginLayout();
@@ -1020,7 +1090,7 @@ void KateRenderer::layoutLine(KateLineLayoutPtr lineLayout, int maxwidth, bool c
         // we include the leading, this must match the ::updateFontHeight code!
         line.setLeadingIncluded(true);
 
-        line.setPosition(QPoint(line.lineNumber() ? shiftX : 0, height));
+        line.setPosition(QPoint(line.lineNumber() ? shiftX : firstLineOffset, height));
 
         if (needShiftX && line.width() > 0)
         {

@@ -89,7 +89,7 @@ public:
     bool selectionOnly() const;
     bool matchCase() const;
 
-    void nextMatchForSelection(KTextEditor::ViewPrivate *view, SearchDirection searchDirection);
+    static void nextMatchForSelection(KTextEditor::ViewPrivate *view, SearchDirection searchDirection, bool hasMeta = false, bool fromNewRange = false);
 
 public Q_SLOTS:
     /**

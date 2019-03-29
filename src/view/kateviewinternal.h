@@ -208,7 +208,7 @@ public:
      */
     KTextEditor::Cursor cursorPosition() const
     {
-        return primaryCursor;
+        return primaryCursor();
     }
 
     KTextEditor::Cursor primaryCursor() const
@@ -277,7 +277,6 @@ private Q_SLOTS:
     void slotRegionBeginEndAddedRemoved(unsigned int);
 
 private:
-    void moveChar(Bias bias, bool sel);
     void moveEdge(Bias bias, bool sel);
     KTextEditor::Cursor maxStartPos(bool changed = false);
     void scrollPos(KTextEditor::Cursor &c, bool force = false, bool calledExternally = false, bool emitSignals = true);

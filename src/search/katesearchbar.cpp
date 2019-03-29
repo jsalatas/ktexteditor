@@ -1321,7 +1321,7 @@ void KateSearchBar::nextMatchForSelection(KTextEditor::ViewPrivate *view, Search
             }
         } else {
             // Find, second try
-            showSearchWrappedHint(searchDirection);
+            //showSearchWrappedHint(searchDirection);
             if (searchDirection == SearchForward) {
                 inputRange.setRange(Cursor(0, 0), selRange.start());
             } else {

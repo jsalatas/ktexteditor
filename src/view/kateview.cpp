@@ -25,8 +25,6 @@
 //BEGIN includes
 #include "kateview.h"
 
-// Maybe I should not include katesearchbar here ...
-#include "katesearchbar.h"
 #include "kateviewinternal.h"
 #include "kateviewhelpers.h"
 #include "katerenderer.h"
@@ -89,6 +87,8 @@
 #include <QFileDialog>
 #include <QToolTip>
 
+#include "katesearchbar.h"
+
 //#define VIEW_RANGE_DEBUG
 
 //END includes
@@ -131,8 +131,8 @@ KTextEditor::ViewPrivate::ViewPrivate(KTextEditor::DocumentPrivate *doc, QWidget
     , m_bottomSpacer(new QSpacerItem(0,0))
     , m_startingUp(true)
     , m_updatingDocumentConfig(false)
-    , m_selection(m_doc->buffer(), KTextEditor::Range::invalid(), Kate::TextRange::ExpandLeft, Kate::TextRange::AllowEmpty)
-    , blockSelect(false)
+//    , m_selection(m_doc->buffer(), KTextEditor::Range::invalid(), Kate::TextRange::ExpandLeft, Kate::TextRange::AllowEmpty)
+//    , blockSelect(false)
     , m_bottomViewBar(nullptr)
     , m_gotoBar(nullptr)
     , m_dictionaryBar(nullptr)
@@ -151,12 +151,6 @@ KTextEditor::ViewPrivate::ViewPrivate(KTextEditor::DocumentPrivate *doc, QWidget
     connect(this, SIGNAL(delayedUpdateOfView()), this, SLOT(slotDelayedUpdateOfView()), Qt::QueuedConnection);
 
     KXMLGUIClient::setComponentName(KTextEditor::EditorPrivate::self()->aboutData().componentName(), KTextEditor::EditorPrivate::self()->aboutData().displayName());
-
-    // selection if for this view only and will invalidate if becoming empty
-    m_selection.setView(this);
-
-    // use z depth defined in moving ranges interface
-    m_selection.setZDepth(-100000.0);
 
     KTextEditor::EditorPrivate::self()->registerView(this);
 
@@ -1862,7 +1856,7 @@ void KTextEditor::ViewPrivate::slotSelectionChanged()
 
     m_cut->setEnabled(selection() || m_config->smartCopyCut());
 
-    m_spell->updateActions();
+    //m_spell->updateActions();
 }
 
 void KTextEditor::ViewPrivate::switchToCmdLine()
@@ -2230,8 +2224,7 @@ bool KTextEditor::ViewPrivate::selection() const
 
 QString KTextEditor::ViewPrivate::selectionText() const
 {
-    return m_doc->text(primarySelection());
-    return doc()->text(m_selection, blockSelect);
+    return doc()->text(primarySelection());
 }
 
 bool KTextEditor::ViewPrivate::removeSelectedText()
@@ -2249,16 +2242,16 @@ bool KTextEditor::ViewPrivate::removeSelectedText()
     }
 
     // don't redraw the cleared selection - that's done in editEnd().
-    if (blockSelect) {
-        int selectionColumn = qMin(doc()->toVirtualColumn(selection.start()), doc()->toVirtualColumn(selection.end()));
-        KTextEditor::Range newSelection = selection;
-        newSelection.setStart(KTextEditor::Cursor(newSelection.start().line(), doc()->fromVirtualColumn(newSelection.start().line(), selectionColumn)));
-        newSelection.setEnd(KTextEditor::Cursor(newSelection.end().line(), doc()->fromVirtualColumn(newSelection.end().line(), selectionColumn)));
-        setSelection(newSelection);
-        setCursorPositionInternal(newSelection.start());
-    } else {
+//    if (blockSelect) {
+//        int selectionColumn = qMin(doc()->toVirtualColumn(selection.start()), doc()->toVirtualColumn(selection.end()));
+//        KTextEditor::Range newSelection = selection;
+//        newSelection.setStart(KTextEditor::Cursor(newSelection.start().line(), doc()->fromVirtualColumn(newSelection.start().line(), selectionColumn)));
+//        newSelection.setEnd(KTextEditor::Cursor(newSelection.end().line(), doc()->fromVirtualColumn(newSelection.end().line(), selectionColumn)));
+//        setSelection(newSelection);
+//        setCursorPositionInternal(newSelection.start());
+//    } else {
         clearSelection(false);
-    }
+//    }
 
     doc()->editEnd();
 
@@ -2297,44 +2290,6 @@ bool KTextEditor::ViewPrivate::lineIsSelection(int line)
 {
 #warning TODO fix this
     return ( line == primarySelection().start().line() && line == primarySelection().end().line());
-}
-
-void KTextEditor::ViewPrivate::tagSelection(const KTextEditor::Range &oldSelection)
-{
-    if (selection()) {
-        if (oldSelection.start().line() == -1) {
-            // We have to tag the whole lot if
-            // 1) we have a selection, and:
-            //  a) it's new; or
-            tagLines(m_selection, true);
-
-        } else if (blockSelection() && (oldSelection.start().column() != m_selection.start().column() || oldSelection.end().column() != m_selection.end().column())) {
-            //  b) we're in block selection mode and the columns have changed
-            tagLines(m_selection, true);
-            tagLines(oldSelection, true);
-
-        } else {
-            if (oldSelection.start() != m_selection.start()) {
-                if (oldSelection.start() < m_selection.start()) {
-                    tagLines(oldSelection.start(), m_selection.start(), true);
-                } else {
-                    tagLines(m_selection.start(), oldSelection.start(), true);
-                }
-            }
-
-            if (oldSelection.end() != m_selection.end()) {
-                if (oldSelection.end() < m_selection.end()) {
-                    tagLines(oldSelection.end(), m_selection.end(), true);
-                } else {
-                    tagLines(m_selection.end(), oldSelection.end(), true);
-                }
-            }
-        }
-
-    } else {
-        // No more selection, clean up
-        tagLines(oldSelection, true);
-    }
 }
 
 void KTextEditor::ViewPrivate::selectWord(const KTextEditor::Cursor &cursor)
@@ -2788,9 +2743,9 @@ void KTextEditor::ViewPrivate::align()
 void KTextEditor::ViewPrivate::comment()
 {
 #warning fixme
-    m_selection.setInsertBehaviors(Kate::TextRange::ExpandLeft | Kate::TextRange::ExpandRight);
+//    m_selection.setInsertBehaviors(Kate::TextRange::ExpandLeft | Kate::TextRange::ExpandRight);
     doc()->comment(this, cursorPosition().line(), cursorPosition().column(), 1);
-    m_selection.setInsertBehaviors(Kate::TextRange::ExpandRight);
+//    m_selection.setInsertBehaviors(Kate::TextRange::ExpandRight);
 }
 
 void KTextEditor::ViewPrivate::uncomment()
@@ -2801,9 +2756,9 @@ void KTextEditor::ViewPrivate::uncomment()
 void KTextEditor::ViewPrivate::toggleComment()
 {
 #warning fixme
-    m_selection.setInsertBehaviors(Kate::TextRange::ExpandLeft | Kate::TextRange::ExpandRight);
+//    m_selection.setInsertBehaviors(Kate::TextRange::ExpandLeft | Kate::TextRange::ExpandRight);
     doc()->comment(this, cursorPosition().line(), cursorPosition().column(), 0);
-    m_selection.setInsertBehaviors(Kate::TextRange::ExpandRight);
+//    m_selection.setInsertBehaviors(Kate::TextRange::ExpandRight);
 }
 
 void KTextEditor::ViewPrivate::uppercase()
@@ -2926,10 +2881,10 @@ void KTextEditor::ViewPrivate::cursorLeft()
 {
     if (selection() && !config()->persistentSelection()) {
         if (currentTextLine().isRightToLeft()) {
-            m_viewInternal->updateCursor(selectionRange().end());
+//            m_viewInternal->updateCursor(selectionRange().end());
             setSelection(KTextEditor::Range::invalid());
         } else {
-            m_viewInternal->updateCursor(selectionRange().start());
+//            m_viewInternal->updateCursor(selectionRange().start());
             setSelection(KTextEditor::Range::invalid());
         }
 
@@ -2955,10 +2910,10 @@ void KTextEditor::ViewPrivate::cursorRight()
 {
     if (selection() && !config()->persistentSelection()) {
         if (currentTextLine().isRightToLeft()) {
-            m_viewInternal->updateCursor(selectionRange().start());
+//            m_viewInternal->updateCursor(selectionRange().start());
             setSelection(KTextEditor::Range::invalid());
         } else {
-            m_viewInternal->updateCursor(selectionRange().end());
+//            m_viewInternal->updateCursor(selectionRange().end());
             setSelection(KTextEditor::Range::invalid());
         }
 

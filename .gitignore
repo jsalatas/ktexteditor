@@ -20,6 +20,6 @@ random_seed
 CMakeLists.txt.user*
 *.unc-backup*
 
-cmake-build-debug/
-
 \.idea/
+cmake-build-debug
+autotests/input/syntax
